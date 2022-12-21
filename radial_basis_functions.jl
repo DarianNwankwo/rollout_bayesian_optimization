@@ -141,6 +141,62 @@ function eval_Dk(rbf::RBFfun, r::Vector{Float64}; D::Int64)
             ∇K' -HK]
 end
 
+function eval_DKxX(rbf :: RBFfun, x::Vector{Float64},
+    X::Matrix{Float64}; D::Int)
+    M, N = size(X)
+    KxX = eval_Dk(rbf, x-X[:,1], D=D)
+    for j = 2:N
+        KxX = hcat(
+            KxX,
+            eval_Dk(rbf, x-X[:,j], D=D)
+        )
+    end
+    KxX
+end
+
+"""
+    eval_DKXX(rbf, X, D=D)
+
+Constructs a covariance matrix between observations and gradients
+where the block entries are the covariances between observations
+and gradient observations
+
+Kij = [k(xi,xj) ∇k(xi,xj)
+       ∇k(xi,xj) Hk(xi,xj)]
+KXX = [K11 ... K1N
+       .   ...  .
+       .   ...  .
+       KN1 ... KNN]
+"""
+function eval_DKXX(rbf :: RBFfun, X::Matrix{Float64}; D::Int)
+    M, N = size(X)
+    nd1 = N*(D+1)
+    K = zeros(nd1, nd1)
+    r0 = zeros(M)
+    ψ0 = eval_Dk(rbf, r0, D=D)
+    s(i) = (i-1)*(D+1)+1
+    e(i) = s(i)+D
+
+    for i = 1:N
+        # Starting indices
+        si, ei = s(i), e(i)
+        K[si:ei, si:ei] = ψ0
+        # Reduce computations by leveraging symmetric structure of
+        # covariance matrix
+        for j = i+1:N
+            # Row remains stationary as columns (j=i+1) vary as a function
+            # of the row index (i)
+            sj, ej = s(j), e(j)
+            Kij = eval_Dk(rbf, X[:,i]-X[:,j], D=D)
+            K[si:ei, sj:ej] = Kij
+            K[sj:ej, si:ei] = Kij'
+        end
+    end
+
+    K
+end
+
+
 """
 Given a radial basis function and a matrix of observations, evaluate the
 kernel matrix.

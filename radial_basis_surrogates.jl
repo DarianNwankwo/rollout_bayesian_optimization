@@ -47,9 +47,7 @@ end
 function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, y::Number)
     X = hcat(s.X, x)
     y = vcat(s.y, y)
-    KxX = eval_KxX(s.ψ, x, s.X)
-    K = [s.K  KxX
-         KxX' eval_KXX(s.ψ, reshape(x, length(x), 1))]
+    K = eval_KXX(s.ψ, X)
     fK = cholesky(Hermitian(K))
     c = fK\y
     return RBFsurrogate(s.ψ, X, K, fK, y, c)
@@ -75,7 +73,7 @@ function eval(s::RBFsurrogate, x::Vector{Float64}, ymin::Real)
     sx.Hμ = function()
         H = zeros(d, d)
         for j = 1:N
-            H += s.c[j] * eval_Hl(s.ψ, x-s.X[:,j])
+            H += s.c[j] * eval_Hk(s.ψ, x-s.X[:,j])
         end
         return H
     end
@@ -106,7 +104,7 @@ function eval(s::RBFsurrogate, x::Vector{Float64}, ymin::Real)
 
     sx.EI = () -> sx.σ*sx.g
     sx.∇EI = () -> sx.g*sx.∇σ + sx.σ*sx.Φz*sx.∇z
-    sx.HEI = () -> Hermitian(x.Hσ*sx.g +
+    sx.HEI = () -> Hermitian(sx.Hσ*sx.g +
         sx.Φz*(sx.∇σ*sx.∇z' + sx.∇z*sx.∇σ' + sx.σ*sx.Hz) +
         sx.σ*sx.ϕz*sx.∇z*sx.∇z')
 
@@ -194,6 +192,25 @@ function gp_draw(s::RBFsurrogate, xloc; stdnormal)
     return f
 end
 
+"""
+The initial sample from our trajectory needs a gradient sample, so this
+should only be used on the initial sample. Subsequent samples should use
+the multi-output surrogate gp_draw function.
+"""
+function gp_draw(sur::RBFsurrogate, xloc; dim, stdnormal)
+    sx = sur(xloc)
+    m = [sx.μ, sx.∇μ...]
+    Ksx = eval_DKxX(sur.ψ, xloc, sur.X, D=dim)
+    Kss = eval_DKXX(sur.ψ, reshape(xloc, length(xloc), 1), D=dim)
+    Kxx = eval_DKXX(sur.ψ, sur.X, D=dim)
+    K = Kss - Ksx*(Kxx\Ksx')
+    L = cholesky(Matrix(Hermitian(K)), Val(true), check = false).U'
+    u = [randn() for _ in 1:dim+1]
+    sample = m + L*u
+    f, ∇f = sample[1], sample[2:end]
+    return f, ∇f
+end
+
 # ------------------------------------------------------------------
 # Operations on GP/RBF surrogate derivatives wrt node positions
 # ------------------------------------------------------------------
@@ -211,6 +228,16 @@ function fit_δsurrogate(s::RBFsurrogate, δX::Matrix{Float64}, ∇f::Function)
     δy = [dot(∇f(s.X[:,j]), δX[:,j]) for j=1:N]
     δc = s.fK \ (δy - δK*s.c)
     return δRBFsurrogate(s, δX, δK, δy, δc)
+end
+
+function update_δsurrogate(us::RBFsurrogate, δs::δRBFsurrogate, 
+    δx::Vector{Float64}, ∇y::Vector{Float64})
+    d, N = size(us.X)
+    δX = hcat(δs.X, δx)
+    δK = eval_δKXX(us.ψ, us.X, δX)
+    δy = vcat(δs.y, dot(∇y, δx))
+    δc = us.fK\(δy - δK*us.c)
+    return δRBFsurrogate(us, δX, δK, δy, δc)
 end
 
 function eval(δs :: δRBFsurrogate, sx, δymin)
@@ -359,7 +386,7 @@ function update_multioutput_surrogate(ms::MultiOutputRBFsurrogate, x::Vector{Flo
     ∇yprev = vcat(∇yprev, ∇y)
     y = vcat(yprev, ∇yprev)
 
-    ∇yndx = ms.∇yndx + 1
+    ∇yndx = length(yprev) + 1
     c = fK\y
     return MultiOutputRBFsurrogate(ms.ψ, X, K, fK, y, c, ms.∇xndx, ∇yndx)
 end
