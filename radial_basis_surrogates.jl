@@ -213,10 +213,11 @@ function fit_δsurrogate(s::RBFsurrogate, δX::Matrix{Float64}, ∇f::Function)
     return δRBFsurrogate(s, δX, δK, δy, δc)
 end
 
-function eval(δs::δRBFsurrogate, sx::LazyStruct, δymin::Number)
+function eval(δs :: δRBFsurrogate, sx, δymin)
+    println("Eval without fantasy ndx")
     δsx = LazyStruct()
     set(δsx, :sx, sx)
-    set(δsx, δymin, δymin)
+    set(δsx, :δymin, δymin)
 
     s = δs.s
     x = sx.x
@@ -237,16 +238,81 @@ function eval(δs::δRBFsurrogate, sx::LazyStruct, δymin::Number)
     δsx.EI  = () -> sx.g*δsx.σ + sx.σ*sx.Φz*δsx.z
     δsx.∇EI = () -> δsx.∇σ*sx.g + sx.Φz*(δsx.z*sx.∇σ + δsx.σ*sx.∇z + sx.σ*δsx.∇z) + sx.ϕz*δsx.z*sx.∇z
 
-    return δsx
+    δsx
 end
 
-function eval(δs::δRBFsurrogate, sx::LazyStruct)
+
+function eval(δs :: δRBFsurrogate, sx)
     ymin, j_ymin = findmin(δs.s.y)
     δymin = δs.y[j_ymin]
     eval(δs, sx, δymin)
 end
 
-(δs::δRBFsurrogate)(sx::LazyStruct) = eval(δs, sx)
+
+(δs :: δRBFsurrogate)(sx) = eval(δs, sx)
+
+
+function evalf(δs :: δRBFsurrogate, sx, δymin, fantasy_ndx)
+    # println("Eval with fantasy ndx")
+    δsx = LazyStruct()
+    set(δsx, :sx, sx)
+    set(δsx, :δymin, δymin)
+
+    s = δs.s
+    x = sx.x
+    d, N = size(s.X)
+
+    # δsx.kx  = () -> eval_δKxX(s.ψ, x, s.X, δs.X)
+    δsx.kx = function()
+        Xknown = s.X[:, 1:fantasy_ndx-1]
+        Xfantasy = s.X[:, fantasy_ndx:end]
+        δXfantasy = δs.X[:, fantasy_ndx:end]
+        known_kx = eval_KxX(s.ψ, x, Xknown)
+        fantasy_kx = eval_δKxX(s.ψ, x, Xfantasy, δXfantasy)
+        # println("Known kx: $(known_kx) -- Fantasy kx: $(fantasy_kx)")
+        return vcat(known_kx, fantasy_kx)
+    end
+
+    # δsx.∇kx = () -> eval_δ∇KxX(s.ψ, x, s.X, δs.X)
+    δsx.∇kx = function()
+        Xknown = s.X[:, 1:fantasy_ndx-1]
+        Xfantasy = s.X[:, fantasy_ndx:end]
+        δXfantasy = δs.X[:, fantasy_ndx:end]
+        known_∇kx = eval_∇KxX(s.ψ, x, Xknown)
+        fantasy_∇kx = eval_δ∇KxX(s.ψ, x, Xfantasy, δXfantasy)
+        # println("Known ∇kx: $(known_∇kx) -- Fantasy ∇kx: $(fantasy_∇kx)")
+        if fantasy_ndx == size(s.X, 2) + 1
+            # println("No fantasy yet: $(known_∇kx)")
+            return known_∇kx
+        end
+        # println("Return: $(hcat(known_∇kx, fantasy_∇kx))")
+        return hcat(known_∇kx, fantasy_∇kx)
+    end
+
+    δsx.μ  = () -> δsx.kx'*s.c + sx.kx'*δs.c
+    δsx.∇μ = () -> δsx.∇kx*s.c + sx.∇kx*δs.c
+
+    δsx.σ  = () -> (-2*δsx.kx'*sx.w + sx.w'*(δs.K*sx.w)) / (2*sx.σ)
+    δsx.∇σ = () -> (-δsx.∇kx*sx.w - sx.∇w*δsx.kx + sx.∇w*(δs.K*sx.w)-δsx.σ*sx.∇σ)/sx.σ
+
+    δsx.z  = () -> (δymin-δsx.μ-sx.z*δsx.σ)/sx.σ
+    δsx.∇z = () -> (-δsx.∇μ-sx.∇z*δsx.σ-sx.z*δsx.∇σ)/sx.σ - δsx.z/sx.σ*sx.∇σ
+
+    δsx.EI  = () -> sx.g*δsx.σ + sx.σ*sx.Φz*δsx.z
+    δsx.∇EI = () -> δsx.∇σ*sx.g + sx.Φz*(δsx.z*sx.∇σ + δsx.σ*sx.∇z + sx.σ*δsx.∇z) + sx.ϕz*δsx.z*sx.∇z
+
+    δsx
+end
+
+
+function evalf(δs :: δRBFsurrogate, sx, fantasy_ndx)
+    ymin, j_ymin = findmin(δs.s.y)
+    δymin = δs.y[j_ymin]
+    evalf(δs, sx, δymin, fantasy_ndx)
+end
+
+
+(δs :: δRBFsurrogate)(sx, fantasy_ndx) = evalf(δs, sx, fantasy_ndx)
 
 # ------------------------------------------------------------------
 # Operations on multi-output GP/RBF surrogate
