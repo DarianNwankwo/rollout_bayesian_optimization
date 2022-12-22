@@ -439,7 +439,7 @@ end
 
 
 function δlog_likelihood(s :: RBFsurrogate, δθ)
-    δK = eval_DΘ_KXX(s.ψ, s.X, δθ)
+    δK = eval_Dθ_KXX(s.ψ, s.X, δθ)
     (s.c'*δK*s.c - tr(s.fK\δK))/2
 end
 

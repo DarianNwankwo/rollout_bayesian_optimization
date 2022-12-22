@@ -93,5 +93,5 @@ function ∇α(T::Trajectory)
     if fmini <= fb
         return zeros(length(xb))
     end
-    return -∇fb*T.opt_HEI
+    return transpose(-∇fb'*T.opt_HEI)
 end

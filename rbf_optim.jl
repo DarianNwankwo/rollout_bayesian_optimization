@@ -33,8 +33,8 @@ function multistart_ei_solve(s::RBFsurrogate, lbs::Vector{Float64},
     ubs::Vector{Float64}, xstarts::Matrix{Float64}; iters::Int = 100)
     xnext, trash = log_ei_solve(s, lbs, ubs, xstarts[:, 1])
     count = 1
-    
-    # println("sxnext.EI: $(s(xnext).EI)")
+   
+    # Investigate what EI solves are suggesting for x here
     while (s(xnext).EI ≈ 0 || isnan(s(xnext).EI)) && count < iters
         try
             xnext, trash = log_ei_solve(s, lbs, ubs, xstarts[:, count])
@@ -44,5 +44,6 @@ function multistart_ei_solve(s::RBFsurrogate, lbs::Vector{Float64},
         end
     end
 
+    println("EI: ", s(xnext).EI)
     return xnext
 end

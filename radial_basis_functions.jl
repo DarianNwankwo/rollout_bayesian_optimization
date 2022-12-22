@@ -37,44 +37,81 @@ function kernel_generic(k, θ)
     return RBFfun(θ, ψ, Dρ_ψ, Dρρ_ψ, ∇θ_ψ)
 end
 
-function kernel_matern52(;θ=[1., 1.])
+# function kernel_matern52(θ=[1., 1.])
+#     function k(ρ, θ)
+#         l, σ = θ[1], θ[2]
+#         c = sqrt(5.0) / l
+#         s = c*ρ
+#         return σ^2*(1+s*(1+s/3.0))*exp(-s)
+#     end
+#     return kernel_generic(k, θ)
+# end
+
+# function kernel_matern32(θ=[1., 1.])
+#     function k(ρ, θ)
+#         l, σ = θ[1], θ[2]
+#         c = sqrt(3.0) / l
+#         s = c*ρ
+#         return σ^2*(1+s)*exp(-s)
+#     end
+#     return kernel_generic(k, θ)
+# end
+
+# function kernel_matern12(θ=[1., 1.])
+#     function k(ρ, θ)
+#         l, σ = θ[1], θ[2]
+#         c = 1.0 / l
+#         s = c*ρ
+#         return σ^2*exp(-s)
+#     end
+#     return kernel_generic(k, θ)
+# end
+
+# function kernel_SE(θ=[1., 1.])
+#     function k(ρ, θ)
+#         l, σ = θ[1], θ[2]
+#         return σ^2*exp(-ρ^2/(2*l^2))
+#     end
+#     return kernel_generic(k, θ)
+# end
+
+function kernel_matern52(θ=[1.])
     function k(ρ, θ)
-        l, σ = θ[1], θ[2]
+        l = θ[1]
         c = sqrt(5.0) / l
         s = c*ρ
-        return σ^2*(1+s*(1+s/3.0))*exp(-s)
+        return (1+s*(1+s/3.0))*exp(-s)
     end
     return kernel_generic(k, θ)
 end
 
-function kernel_matern32(;θ=[1., 1.])
+function kernel_matern32(θ=[1.])
     function k(ρ, θ)
-        l, σ = θ[1], θ[2]
+        l = θ[1]
         c = sqrt(3.0) / l
         s = c*ρ
-        return σ^2*(1+s)*exp(-s)
+        return (1+s)*exp(-s)
     end
     return kernel_generic(k, θ)
 end
 
-function kernel_matern12(;θ=[1., 1.])
+function kernel_matern12(θ=[1.])
     function k(ρ, θ)
-        l, σ = θ[1], θ[2]
+        l = θ[1]
         c = 1.0 / l
         s = c*ρ
-        return σ^2*exp(-s)
+        return exp(-s)
     end
     return kernel_generic(k, θ)
 end
 
-function kernel_SE(;θ=[1., 1.])
+function kernel_SE(θ=[1.])
     function k(ρ, θ)
-        l, σ = θ[1], θ[2]
-        return σ^2*exp(-ρ^2/(2*l^2))
+        l = θ[1]
+        return exp(-ρ^2/(2*l^2))
     end
     return kernel_generic(k, θ)
 end
-
 
 """
 Given a radial basis function and the distances between two points, evaluate
