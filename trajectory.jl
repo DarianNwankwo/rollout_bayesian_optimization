@@ -25,7 +25,7 @@ function Trajectory(s::RBFsurrogate, x0::Vector{Float64}, fndx::Int; h::Int)
     xfs, ys, ∇ys = zeros(d, h+1), zeros(h+1), zeros(d, h+1)
     xfs[:, 1] = x0
 
-    opt_HEI = zeros(d+1, d+1)
+    opt_HEI = zeros(d, d)
 
     return Trajectory(s, δs, ms, xfs, ys, ∇ys, h, fndx, opt_HEI)
 end
