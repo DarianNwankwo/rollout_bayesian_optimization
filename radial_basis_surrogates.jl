@@ -184,7 +184,7 @@ function gp_draw(s::RBFsurrogate, xloc; stdnormal)
     sx = s(xloc)
     m = sx.μ
     Ksx = eval_KxX(s.ψ, xloc, s.X)
-    Kss = eval_k(s.ψ, 0*xloc)
+    Kss = eval_k(s.ψ, xloc-xloc)
     Kxx = eval_KXX(s.ψ, s.X)
     K = Kss - Ksx'*(Kxx\Ksx)
     L = sqrt(K)
@@ -205,8 +205,7 @@ function gp_draw(sur::RBFsurrogate, xloc; dim, stdnormal)
     Kxx = eval_DKXX(sur.ψ, sur.X, D=dim)
     K = Kss - Ksx*(Kxx\Ksx')
     L = cholesky(Matrix(Hermitian(K)), Val(true), check = false).U'
-    u = [randn() for _ in 1:dim+1]
-    sample = m + L*u
+    sample = m + L*stdnormal
     f, ∇f = sample[1], sample[2:end]
     return f, ∇f
 end
@@ -241,7 +240,6 @@ function update_δsurrogate(us::RBFsurrogate, δs::δRBFsurrogate,
 end
 
 function eval(δs :: δRBFsurrogate, sx, δymin)
-    println("Eval without fantasy ndx")
     δsx = LazyStruct()
     set(δsx, :sx, sx)
     set(δsx, :δymin, δymin)
