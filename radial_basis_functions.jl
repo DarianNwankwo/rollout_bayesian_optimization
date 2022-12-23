@@ -37,6 +37,16 @@ function kernel_generic(k, θ)
     return RBFfun(θ, ψ, Dρ_ψ, Dρρ_ψ, ∇θ_ψ)
 end
 
+function kernel_scale(kfun, θ; kwargs...)
+    s = θ[1]
+    base_rbf = kfun(θ[2:end]; kwargs...)
+    ψ(ρ)     = s * base_rbf.ψ(ρ)
+    Dρ_ψ(ρ)  = s * base_rbf.Dρ_ψ(ρ)
+    Dρρ_ψ(ρ) = s * base_rbf.Dρρ_ψ(ρ)
+    ∇θ_ψ(ρ)  = vcat([base_rbf.ψ(ρ)], s * base_rbf.∇θ_ψ(ρ))
+    RBFfun(θ, ψ, Dρ_ψ, Dρρ_ψ, ∇θ_ψ)
+end
+
 # function kernel_matern52(θ=[1., 1.])
 #     function k(ρ, θ)
 #         l, σ = θ[1], θ[2]
