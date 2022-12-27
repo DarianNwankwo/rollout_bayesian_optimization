@@ -13,10 +13,14 @@ mutable struct Trajectory
     opt_HEI::Matrix{Float64}
 end
 
+"""
+Consider giving the perturbed surrogate a zero matrix to handle computing variations
+in the surrogate at the initial point.
+"""
 function Trajectory(s::RBFsurrogate, x0::Vector{Float64}, fndx::Int; h::Int)
     d, N = size(s.X)
     # Initialize base surrogates as placeholders
-    δs = δRBFsurrogate(s, s.X, s.K, s.y, s.c)
+    δs = δRBFsurrogate(s, zeros(size(s.X)...), s.K, s.y, s.c)
     ms = MultiOutputRBFsurrogate(
         s.ψ, s.X, s.K, s.fK, s.y, s.c, size(s.X, 2) + 1, length(s.y) + 1    
     )

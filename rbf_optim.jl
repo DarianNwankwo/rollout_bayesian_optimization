@@ -30,19 +30,28 @@ function log_ei_solve(s::RBFsurrogate, lbs::Vector{Float64}, ubs::Vector{Float64
 end
 
 function multistart_ei_solve(s::RBFsurrogate, lbs::Vector{Float64},
-    ubs::Vector{Float64}, xstarts::Matrix{Float64}; iters::Int = 100)
-    xnext, trash = log_ei_solve(s, lbs, ubs, xstarts[:, 1])
-    count = 1
-   
-    # Investigate what EI solves are suggesting for x here
-    while (s(xnext).EI ≈ 0 || isnan(s(xnext).EI)) && count < iters
+    ubs::Vector{Float64}, xstarts::Matrix{Float64})
+    candidates = []
+    
+    # Threads.@threads for i in 1:size(xstarts, 2)
+    #     xi = xstarts[:,i]
+    #     # try # In case we try a location too close to a known location
+    #     minimizer, res = log_ei_solve(sur, lbs, ubs, xi)
+    #     push!(candidates, (minimizer, minimum(res)))
+    #     # catch e
+    #     # end
+    # end
+    for i in 1:size(xstarts, 2)
+        xi = xstarts[:,i]
         try
-            count += 1
-            xnext, trash = log_ei_solve(s, lbs, ubs, xstarts[:, count])
+            minimizer, res = log_ei_solve(sur, lbs, ubs, xi)
+            push!(candidates, (minimizer, minimum(res)))
         catch e
-            continue
         end
     end
-
-    return xnext
+    
+    mini, j_mini = findmin(pair -> pair[2], candidates)
+    minimizer = candidates[j_mini][1]
+    
+    return minimizer
 end

@@ -182,14 +182,7 @@ eval(s::RBFsurrogate, x::Vector{Float64}) = eval(s, x, minimum(s.y))
 
 function gp_draw(s::RBFsurrogate, xloc; stdnormal)
     sx = s(xloc)
-    m = sx.μ
-    Ksx = eval_KxX(s.ψ, xloc, s.X)
-    Kss = eval_k(s.ψ, xloc-xloc)
-    Kxx = eval_KXX(s.ψ, s.X)
-    K = Kss - Ksx'*(Kxx\Ksx)
-    L = sqrt(K)
-    f = m + L*stdnormal
-    return f
+    return sx.μ + sx.σ*stdnormal
 end
 
 """
@@ -197,14 +190,16 @@ The initial sample from our trajectory needs a gradient sample, so this
 should only be used on the initial sample. Subsequent samples should use
 the multi-output surrogate gp_draw function.
 """
-function gp_draw(sur::RBFsurrogate, xloc; dim, stdnormal)
+function dgp_draw(sur::RBFsurrogate, xloc; dim, stdnormal)
     sx = sur(xloc)
     m = [sx.μ, sx.∇μ...]
     Ksx = eval_DKxX(sur.ψ, xloc, sur.X, D=dim)
-    Kss = eval_DKXX(sur.ψ, reshape(xloc, length(xloc), 1), D=dim)
+    Kss = eval_Dk(sur.ψ, 0*xloc; D=dim)
     Kxx = eval_DKXX(sur.ψ, sur.X, D=dim)
     K = Kss - Ksx*(Kxx\Ksx')
     L = cholesky(Matrix(Hermitian(K)), Val(true), check = false).U'
+    # L = [sx.σ  sx.∇σ';
+    #      sx.∇σ sx.Hσ]
     sample = m + L*stdnormal
     f, ∇f = sample[1], sample[2:end]
     return f, ∇f
@@ -292,7 +287,7 @@ function evalf(δs :: δRBFsurrogate, sx, δymin, fantasy_ndx)
         Xknown = s.X[:, 1:fantasy_ndx-1]
         Xfantasy = s.X[:, fantasy_ndx:end]
         δXfantasy = δs.X[:, fantasy_ndx:end]
-        known_kx = eval_KxX(s.ψ, x, Xknown)
+        known_kx = eval_KxX(s.ψ, x, Xknown)*0
         fantasy_kx = eval_δKxX(s.ψ, x, Xfantasy, δXfantasy)
         # println("Known kx: $(known_kx) -- Fantasy kx: $(fantasy_kx)")
         return vcat(known_kx, fantasy_kx)
@@ -377,7 +372,7 @@ function update_multioutput_surrogate(ms::MultiOutputRBFsurrogate, x::Vector{Flo
     # K = [ms.K  Ksx';
     #      Ksx   eval_mixed_Kxx(ψ, x)]
     K = eval_mixed_KXX(ψ, X; j_∇=ms.∇xndx)
-    fK = cholesky(Hermitian(K))
+    fK = cholesky(Hermitian(K + 1e-6I))
 
     yprev, ∇yprev = ms.y[1:ms.∇yndx-1], ms.y[ms.∇yndx:end]
     yprev = vcat(yprev, y)

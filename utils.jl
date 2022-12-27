@@ -20,7 +20,7 @@ function is_odd(num)
 end
 
 """
-Transforms av even-sized multivariate uniform distribution to be normally
+Transforms an even-sized multivariate uniform distribution to be normally
 distributed with mean 0 and variance 1.
 """
 function box_muller_transform(S)

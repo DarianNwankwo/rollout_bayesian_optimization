@@ -18,11 +18,16 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
     fbest = minimum(T.s.y)
     x0 = T.xfs[:, 1]
     
+    # (Inquiry) This assumption about having gradient information might be hurting us
     # Sample a fantasized value and gradient at x0
-    f0, ∇f0 = gp_draw(T.s, x0, dim=length(x0), stdnormal=rnstream[:,1])
+    # f0, ∇f0 = dgp_draw(T.s, x0, dim=length(x0), stdnormal=rnstream[:,1])
+    f0 = gp_draw(T.s, x0, stdnormal=rnstream[1,1])
+    f0plush = gp_draw(T.s, x0 + [1e-8], stdnormal=rnstream[1,1])
+    ∇f0 = [(f0plush - f0) / 1e-8]
     sx0 = T.s(x0)
     T.opt_HEI = sx0.HEI
     δsx0 = -sx0.HEI \ T.δs(sx0, T.fantasy_ndx).∇EI
+    # δsx0 = -sx0.HEI \ T.δs(sx0).∇EI
 
     # Update surrogate, perturbed surrogate, and multioutput surrogate
     T.s = update_surrogate(T.s, x0, f0)
@@ -34,13 +39,16 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
     T.xfs[:, 1] = x0
 
     # Perform rollout for the fantasized trajectories
-    xstarts = randsample(10, length(∇f0), lbs, ubs)
+    xstarts = randsample(10, length(∇f0), lbs, ubs) # Probably should parametrize this number
     for j in 1:T.h
         # Solve base acquisition function to determine next sample location
         xnext = multistart_ei_solve(T.s, lbs, ubs, xstarts)
 
         # Draw fantasized sample at proposed location after base acquisition solve
-        fi, ∇fi = gp_draw(T.ms, xnext; stdnormal=rnstream[:, j+1])
+        # fi, ∇fi = gp_draw(T.ms, xnext; stdnormal=rnstream[:, j+1])
+        fi = gp_draw(T.s, xnext, stdnormal=rnstream[1,1])
+        fiplush = gp_draw(T.s, xnext + [1e-8], stdnormal=rnstream[1,1])
+        ∇fi = [(fiplush - fi) / 1e-8]
         
         # Compute variations in xnext and update surrogate, perturbed surrogate,
         # and multioutput surrogate

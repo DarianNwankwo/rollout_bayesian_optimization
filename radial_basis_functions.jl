@@ -44,8 +44,11 @@ function kernel_scale(kfun, θ; kwargs...)
     Dρ_ψ(ρ)  = s * base_rbf.Dρ_ψ(ρ)
     Dρρ_ψ(ρ) = s * base_rbf.Dρρ_ψ(ρ)
     ∇θ_ψ(ρ)  = vcat([base_rbf.ψ(ρ)], s * base_rbf.∇θ_ψ(ρ))
-    RBFfun(θ, ψ, Dρ_ψ, Dρρ_ψ, ∇θ_ψ)
+    return RBFfun(θ, ψ, Dρ_ψ, Dρρ_ψ, ∇θ_ψ)
 end
+
+# function kernel_add(kfun1, kfun2)
+# end
 
 # function kernel_matern52(θ=[1., 1.])
 #     function k(ρ, θ)
@@ -85,12 +88,23 @@ end
 #     return kernel_generic(k, θ)
 # end
 
-function kernel_matern52(θ=[1.])
+function kernel_whitenoise(;σ=1e-4)
+    function k(ρ, θ=[σ])
+        if ρ ≈ 0
+            return θ[1]^2
+        end
+        return 0.
+    end
+    return kernel_generic(k, [σ])
+end
+
+function kernel_matern52(θ=[1.]; σ=0.)
+    wn = kernel_whitenoise(σ=σ)
     function k(ρ, θ)
         l = θ[1]
         c = sqrt(5.0) / l
         s = c*ρ
-        return (1+s*(1+s/3.0))*exp(-s)
+        return (1+s*(1+s/3.0))*exp(-s) + wn(ρ)
     end
     return kernel_generic(k, θ)
 end
