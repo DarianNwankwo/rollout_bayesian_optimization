@@ -53,8 +53,8 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
         # Compute variations in xnext and update surrogate, perturbed surrogate,
         # and multioutput surrogate
         sxnext = T.s(xnext)
-        δsxnext = -sxnext.HEI \ T.δs(sxnext, T.fantasy_ndx).∇EI
-        # δsxnext = -sxnext.HEI \ T.δs(sxnext).∇EI
+        # δsxnext = -sxnext.HEI \ T.δs(sxnext, T.fantasy_ndx).∇EI
+        δsxnext = -sxnext.HEI \ T.δs(sxnext).∇EI
 
         # Update hessian if a new best is found on trajectory
         if fi < fbest
