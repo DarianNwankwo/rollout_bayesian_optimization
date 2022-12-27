@@ -212,7 +212,8 @@ function eval_DKxX(rbf :: RBFfun, x::Vector{Float64},
             eval_Dk(rbf, x-X[:,j], D=D)
         )
     end
-    KxX
+
+    return KxX
 end
 
 """
@@ -254,7 +255,7 @@ function eval_DKXX(rbf :: RBFfun, X::Matrix{Float64}; D::Int)
         end
     end
 
-    K
+    return K
 end
 
 
