@@ -19,7 +19,7 @@ end
 function fit_surrogate(ψ::RBFfun, X::Matrix{Float64}, f::Function)
     d, N = size(X)
     K = eval_KXX(ψ, X)
-    fK = cholesky(Hermitian(K))
+    fK = cholesky(Hermitian(K + 1e-6I))
     y = [f(X[:,j]) for j = 1:N]
     c = fK\y
     return RBFsurrogate(ψ, X, K, fK, y, c)
@@ -28,7 +28,7 @@ end
 function fit_surrogate(ψ::RBFfun, X::Matrix{Float64}, y::Vector{Float64})
     d, N = size(X)
     K = eval_KXX(ψ, X)
-    fK = cholesky(Hermitian(K))
+    fK = cholesky(Hermitian(K + 1e-6I))
     c = fK\y
     return RBFsurrogate(ψ, X, K, fK, y, c)
 end
@@ -39,7 +39,7 @@ function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, f::Function)
     KxX = eval_KxX(s.ψ, x, s.X)
     K = [s.K  KxX
          KxX' eval_KXX(s.ψ, reshape(x, length(x), 1))]
-    fK = cholesky(Hermitian(K))
+    fK = cholesky(Hermitian(K + 1e-6I))
     c = fK\y
     return RBFsurrogate(s.ψ, X, K, fK, y, c)
 end
@@ -48,7 +48,7 @@ function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, y::Number)
     X = hcat(s.X, x)
     y = vcat(s.y, y)
     K = eval_KXX(s.ψ, X)
-    fK = cholesky(Hermitian(K))
+    fK = cholesky(Hermitian(K + 1e-6I))
     c = fK\y
     return RBFsurrogate(s.ψ, X, K, fK, y, c)
 end
@@ -289,7 +289,6 @@ function evalf(δs :: δRBFsurrogate, sx, δymin, fantasy_ndx)
         δXfantasy = δs.X[:, fantasy_ndx:end]
         known_kx = eval_KxX(s.ψ, x, Xknown)*0
         fantasy_kx = eval_δKxX(s.ψ, x, Xfantasy, δXfantasy)
-        # println("Known kx: $(known_kx) -- Fantasy kx: $(fantasy_kx)")
         return vcat(known_kx, fantasy_kx)
     end
 
