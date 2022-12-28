@@ -106,22 +106,24 @@ end
 
 dir = dirname(@__FILE__)
 plot_domain = range(lbs[1], ubs[1], length=length(eis[2][:, 2]))
+ylims = (minimum(eis[2][:, 1]) - 2*maximum(eis[2][:, 2]),
+    maximum(eis[2][:, 1]) + 2*maximum(eis[2][:, 2]))
 
 # Save individual plot for non-low discrepancy sequence simulation
 plot(plot_domain, eis[2][:, 1], ribbons=sqrt.(eis[2][:, 2]),
-    label="EI(h=$HORIZON)", linestyle=:dash
+    label="EI(h=$HORIZON)", linestyle=:dash, ylims=ylims
 )
 savefig("$(dir)/plots/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES).png")
 
 # Save individual plot for low discrepancy sequence simulation
 plot(plot_domain, eis[1][:, 1], ribbons=sqrt.(eis[1][:, 2]),
-    label="LDS EI(h=$HORIZON)", linestyle=:dash
+    label="LDS EI(h=$HORIZON)", linestyle=:dash, ylims=ylims
 )
 savefig("$(dir)/plots/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES)_lds.png")
 
 # Save plot with graphs stacked for comparison
 plot(plot_domain, eis[2][:, 1], ribbons=sqrt.(eis[2][:, 2]),
-    label="EI(h=$HORIZON)", linestyle=:dash
+    label="EI(h=$HORIZON)", linestyle=:dash, ylims=ylims
 )
 plot!(plot_domain, eis[1][:, 1], ribbons=sqrt.(eis[1][:, 2]),
     label="LDS EI(h=$HORIZON)", linestyle=:dash
@@ -130,17 +132,17 @@ savefig("$(dir)/plots/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES)_stacked.png")
 
 # Save similar plots for gradients
 plot(plot_domain, ∇eis[2][:, 1], ribbons=sqrt.(∇eis[2][:, 2]),
-    label="EI(h=$HORIZON)", linestyle=:dash
+    label="EI(h=$HORIZON)", linestyle=:dash, ylims=ylims
 )
 savefig("$(dir)/plots/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES).png")
 
 plot(plot_domain, ∇eis[1][:, 1], ribbons=sqrt.(∇eis[1][:, 2]),
-    label="LDS EI(h=$HORIZON)", linestyle=:dash
+    label="LDS EI(h=$HORIZON)", linestyle=:dash, ylims=ylims
 )
 savefig("$(dir)/plots/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES)_lds.png")
 
 plot(plot_domain, ∇eis[2][:, 1], ribbons=sqrt.(∇eis[2][:, 2]),
-    label="EI(h=$HORIZON)", linestyle=:dash
+    label="EI(h=$HORIZON)", linestyle=:dash, ylims=ylims
 )
 plot!(plot_domain, ∇eis[1][:, 1], ribbons=sqrt.(∇eis[1][:, 2]),
     label="LDS EI(h=$HORIZON)", linestyle=:dash
