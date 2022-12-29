@@ -148,3 +148,17 @@ end
 function inbounds(x0, lbs, ubs)
     return all(lbs .< x0 .< ubs)
 end
+
+"""
+Generate a batch of N points inbounds relative to the lowerbounds and
+upperbounds
+"""
+function generate_batch(N; lbs, ubs)
+    s = SobolSeq(lbs, ubs)
+    B = reduce(hcat, next!(s) for i = 1:N)
+    return B
+end
+
+function centered_fd(f, u, du, h)
+    (f(u+h*du)-f(u-h*du))/(2h)
+end
