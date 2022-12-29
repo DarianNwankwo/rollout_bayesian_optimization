@@ -1,3 +1,5 @@
+using Sobol
+
 # Rename to rollout once refactor is complete
 include("lazy_struct.jl")
 include("low_discrepancy.jl")
@@ -39,16 +41,18 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
     T.xfs[:, 1] = x0
 
     # Perform rollout for the fantasized trajectories
-    xstarts = randsample(10, length(∇f0), lbs, ubs) # Probably should parametrize this number
+    s = SobolSeq(lbs, ubs)
+    xstarts = reduce(hcat, next!(s) for i = 1:64)
+    # xstarts = randsample(10, length(∇f0), lbs, ubs) # Probably should parametrize this number
     for j in 1:T.h
         # Solve base acquisition function to determine next sample location
         xnext = multistart_ei_solve(T.s, lbs, ubs, xstarts)
 
         # Draw fantasized sample at proposed location after base acquisition solve
-        # fi, ∇fi = gp_draw(T.ms, xnext; stdnormal=rnstream[:, j+1])
-        fi = gp_draw(T.s, xnext, stdnormal=rnstream[1,1])
-        fiplush = gp_draw(T.s, xnext + [1e-8], stdnormal=rnstream[1,1])
-        ∇fi = [(fiplush - fi) / 1e-8]
+        fi, ∇fi = gp_draw(T.ms, xnext; stdnormal=rnstream[:, j+1])
+        # fi = gp_draw(T.s, xnext, stdnormal=rnstream[1,1])
+        # fiplush = gp_draw(T.s, xnext + [1e-8], stdnormal=rnstream[1,1])
+        # ∇fi = [(fiplush - fi) / 1e-8]
         
         # Compute variations in xnext and update surrogate, perturbed surrogate,
         # and multioutput surrogate
@@ -102,5 +106,5 @@ function ∇α(T::Trajectory)
     if fmini <= fb
         return zeros(length(xb))
     end
-    return transpose(-∇fb'*T.opt_HEI)
+    return transpose(∇fb'*T.opt_HEI)
 end
