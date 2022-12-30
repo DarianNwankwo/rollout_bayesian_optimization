@@ -99,12 +99,12 @@ function kernel_whitenoise(;σ=1e-4)
 end
 
 function kernel_matern52(θ=[1.]; σ=0.)
-    wn = kernel_whitenoise(σ=σ)
+    # wn = kernel_whitenoise(σ=σ)
     function k(ρ, θ)
         l = θ[1]
         c = sqrt(5.0) / l
         s = c*ρ
-        return (1+s*(1+s/3.0))*exp(-s) + wn(ρ)
+        return (1+s*(1+s/3.0))*exp(-s) # + wn(ρ)
     end
     return kernel_generic(k, θ)
 end
