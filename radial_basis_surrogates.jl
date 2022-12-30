@@ -47,7 +47,10 @@ end
 function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, y::Number)
     X = hcat(s.X, x)
     y = vcat(s.y, y)
-    K = eval_KXX(s.ψ, X)
+    # K = eval_KXX(s.ψ, X)
+    KxX = eval_KxX(s.ψ, x, s.X)
+    K = [s.K  KxX
+         KxX' eval_KXX(s.ψ, reshape(x, length(x), 1))]
     fK = cholesky(Hermitian(K + 1e-6I))
     c = fK\y
     return RBFsurrogate(s.ψ, X, K, fK, y, c)
@@ -367,10 +370,10 @@ function update_multioutput_surrogate(ms::MultiOutputRBFsurrogate, x::Vector{Flo
     d, N = size(ms.X)
     X = hcat(ms.X, x)
 
-    # Ksx = eval_mixed_KxX(ms.ψ, ms.X, x; j_∇=ms.∇xndx)
-    # K = [ms.K  Ksx';
-    #      Ksx   eval_mixed_Kxx(ψ, x)]
-    K = eval_mixed_KXX(ψ, X; j_∇=ms.∇xndx)
+    Ksx = eval_mixed_KxX(ms.ψ, ms.X, x; j_∇=ms.∇xndx)
+    K = [ms.K  Ksx';
+         Ksx   eval_mixed_Kxx(ψ, x)]
+    # K = eval_mixed_KXX(ψ, X; j_∇=ms.∇xndx)
     fK = cholesky(Hermitian(K + 1e-6I))
 
     yprev, ∇yprev = ms.y[1:ms.∇yndx-1], ms.y[ms.∇yndx:end]
