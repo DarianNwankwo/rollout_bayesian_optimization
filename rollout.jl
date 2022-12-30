@@ -22,13 +22,17 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
     
     # (Inquiry) This assumption about having gradient information might be hurting us
     # Sample a fantasized value and gradient at x0
-    # f0, ∇f0 = dgp_draw(T.s, x0, dim=length(x0), stdnormal=rnstream[:,1])
     f0 = gp_draw(T.s, x0, stdnormal=rnstream[1,1])
-    f0plush = gp_draw(T.s, x0 + [1e-8], stdnormal=rnstream[1,1])
-    ∇f0 = [(f0plush - f0) / 1e-8]
+    h, E, ∇f0 = 1e-8, I(length(x0)), zeros(length(x0))
+    for d in 1:length(x0)
+        xplus = x0 + E[:, d] * h
+        xminus = x0 - E[:, d] * h
+        fplus = gp_draw(T.s, xplus, stdnormal=rnstream[d, 1])
+        fminus = gp_draw(T.s, xminus, stdnormal=rnstream[d, 1])
+        ∇f0[d] = (fplus - fminus) / (2h)
+    end
     sx0 = T.s(x0)
     T.opt_HEI = sx0.HEI
-    # δsx0 = -sx0.HEI \ T.δs(sx0, T.fantasy_ndx).∇EI
     δsx0 = -sx0.HEI \ T.δs(sx0).∇EI
 
     # Update surrogate, perturbed surrogate, and multioutput surrogate
@@ -42,7 +46,7 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
 
     # Perform rollout for the fantasized trajectories
     s = SobolSeq(lbs, ubs)
-    xstarts = reduce(hcat, next!(s) for i = 1:64)
+    xstarts = reduce(hcat, next!(s) for i = 1:16)
     # xstarts = randsample(10, length(∇f0), lbs, ubs) # Probably should parametrize this number
     for j in 1:T.h
         # Solve base acquisition function to determine next sample location
@@ -50,9 +54,6 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
 
         # Draw fantasized sample at proposed location after base acquisition solve
         fi, ∇fi = gp_draw(T.ms, xnext; stdnormal=rnstream[:, j+1])
-        # fi = gp_draw(T.s, xnext, stdnormal=rnstream[1,1])
-        # fiplush = gp_draw(T.s, xnext + [1e-8], stdnormal=rnstream[1,1])
-        # ∇fi = [(fiplush - fi) / 1e-8]
         
         # Compute variations in xnext and update surrogate, perturbed surrogate,
         # and multioutput surrogate
@@ -78,14 +79,14 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
 end
 
 function sample(T::Trajectory)
-    path = [(T.xfs[:,i], T.ys[i], T.∇ys[:,i]) for i in 1:T.h+1]
+    path = [(x=T.xfs[:,i], y=T.ys[i], ∇y=T.∇ys[:,i]) for i in 1:T.h+1]
     return path
 end
 
 function best(T::Trajectory)
     # step[2] corresponds to the function value
     path = sample(T)
-    _, minndx = findmin([step[2] for step in path])
+    _, minndx = findmin([step.y for step in path])
     return minndx, path[minndx]
 end
 
