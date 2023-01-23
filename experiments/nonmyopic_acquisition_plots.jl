@@ -49,7 +49,7 @@ rns = randn(MC_SAMPLES, testfn.dim+1, HORIZON+1)
 N, θ = 1, [.25]
 X = [.15, .85]
 X = reshape(X, 1, length(X))
-ψ = kernel_scale(kernel_matern52, [5., θ...])
+ψ = kernel_scale(kernel_matern52, [1., θ...])
 sur = fit_surrogate(ψ, X, testfn.f)
 
 domain = filter(x -> !(x in X), lbs[1]:.01:ubs[1])
@@ -106,28 +106,28 @@ end
 
 dir = dirname(@__FILE__)
 plot_domain = range(lbs[1], ubs[1], length=length(eis[2][:, 2]))
-ylims = (minimum(eis[2][:, 1]) - 2*maximum(eis[2][:, 2]),
-    maximum(eis[2][:, 1]) + 2*maximum(eis[2][:, 2]))
-∇ylims = (minimum(∇eis[2][:, 1]) - 2*maximum(∇eis[2][:, 1]),
-    maximum(∇eis[2][:, 1]) + 2*maximum(∇eis[2][:, 1]))
-∇ylims_lds = (minimum(∇eis[1][:, 1]) - 2*maximum(∇eis[1][:, 1]),
-    maximum(∇eis[1][:, 1]) + 2*maximum(∇eis[1][:, 1]))
+# ylims = (minimum(eis[2][:, 1]) - 2*maximum(eis[2][:, 2]),
+#     maximum(eis[2][:, 1]) + 2*maximum(eis[2][:, 2]))
+# ∇ylims = (minimum(∇eis[2][:, 1]) - 2*maximum(∇eis[2][:, 1]),
+#     maximum(∇eis[2][:, 1]) + 2*maximum(∇eis[2][:, 1]))
+# ∇ylims_lds = (minimum(∇eis[1][:, 1]) - 2*maximum(∇eis[1][:, 1]),
+#     maximum(∇eis[1][:, 1]) + 2*maximum(∇eis[1][:, 1]))
 
 # Save individual plot for non-low discrepancy sequence simulation
 plot(plot_domain, eis[2][:, 1], ribbons=sqrt.(eis[2][:, 2]),
-    label="EI(h=$HORIZON)", linestyle=:dash, ylims=ylims
+    label="EI(h=$HORIZON)", linestyle=:dash#, ylims=ylims
 )
 savefig("$(dir)/plots/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES).png")
 
 # Save individual plot for low discrepancy sequence simulation
 plot(plot_domain, eis[1][:, 1], ribbons=sqrt.(eis[1][:, 2]),
-    label="LDS EI(h=$HORIZON)", linestyle=:dash, ylims=ylims
+    label="LDS EI(h=$HORIZON)", linestyle=:dash#, ylims=ylims
 )
 savefig("$(dir)/plots/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES)_lds.png")
 
 # Save plot with graphs stacked for comparison
 plot(plot_domain, eis[2][:, 1], ribbons=sqrt.(eis[2][:, 2]),
-    label="EI(h=$HORIZON)", linestyle=:dash, ylims=ylims
+    label="EI(h=$HORIZON)", linestyle=:dash#, ylims=ylims
 )
 plot!(plot_domain, eis[1][:, 1], ribbons=sqrt.(eis[1][:, 2]),
     label="LDS EI(h=$HORIZON)", linestyle=:dash
@@ -136,17 +136,17 @@ savefig("$(dir)/plots/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES)_stacked.png")
 
 # Save similar plots for gradients
 plot(plot_domain, ∇eis[2][:, 1], ribbons=sqrt.(∇eis[2][:, 2]),
-    label="EI(h=$HORIZON)", linestyle=:dash, ylims=∇ylims
+    label="EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims
 )
 savefig("$(dir)/plots/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES).png")
 
 plot(plot_domain, ∇eis[1][:, 1], ribbons=sqrt.(∇eis[1][:, 2]),
-    label="LDS EI(h=$HORIZON)", linestyle=:dash, ylims=∇ylims_lds
+    label="LDS EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims_lds
 )
 savefig("$(dir)/plots/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES)_lds.png")
 
 plot(plot_domain, ∇eis[2][:, 1], ribbons=sqrt.(∇eis[2][:, 2]),
-    label="EI(h=$HORIZON)", linestyle=:dash, ylims=∇ylims
+    label="EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims
 )
 plot!(plot_domain, ∇eis[1][:, 1], ribbons=sqrt.(∇eis[1][:, 2]),
     label="LDS EI(h=$HORIZON)", linestyle=:dash

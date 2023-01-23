@@ -78,6 +78,11 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
     end
 end
 
+function rollout1D!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
+    rnstream)
+    
+end
+
 function sample(T::Trajectory)
     path = [(x=T.xfs[:,i], y=T.ys[i], ∇y=T.∇ys[:,i]) for i in 1:T.h+1]
     return path
@@ -107,5 +112,7 @@ function ∇α(T::Trajectory)
     if fmini <= fb
         return zeros(length(xb))
     end
+    # Investigate the computations from the ground up and 
+    # see where the sign error might have been introduced
     return transpose(∇fb'*T.opt_HEI)
 end

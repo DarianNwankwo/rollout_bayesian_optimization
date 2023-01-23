@@ -462,7 +462,7 @@ function δlog_likelihood_v(s :: RBFsurrogate, δθ)
     n = size(s.X)[2]
     c = s.c
     y = s.y
-    δK = eval_DΘ_KXX(s.ψ, s.X, δθ)
+    δK = eval_Dθ_KXX(s.ψ, s.X, δθ)
     n/2*(c'*δK*c)/(c'*y) - tr(s.fK\δK)/2
 end
 
