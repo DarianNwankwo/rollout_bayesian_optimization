@@ -140,6 +140,7 @@ function tr_SR1(x0, fsetup, f, ∇f, H;
     for k = 1:nsteps
 
         s, hit_constraint = solve_tr(gx, H, Δ)
+        # println("(s, constraint, xprev): $((s, hit_constraint, x))")
         xnew = x + s
         sxnew = fsetup(xnew)
         ϕnew = f(sxnew)
@@ -175,6 +176,7 @@ function tr_SR1(x0, fsetup, f, ∇f, H;
         monitor(x, norm(gx), Δ)
 
         # Convergence check
+        # println("x: ", x)
         if norm(gx) < rtol
             return x, sx
         end

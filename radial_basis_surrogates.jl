@@ -14,23 +14,24 @@ struct RBFsurrogate
     fK::Cholesky
     y::Vector{Float64}
     c::Vector{Float64}
+    σn2::Float64
 end
 
-function fit_surrogate(ψ::RBFfun, X::Matrix{Float64}, f::Function)
+function fit_surrogate(ψ::RBFfun, X::Matrix{Float64}, f::Function; σn2=1e-6)
     d, N = size(X)
-    K = eval_KXX(ψ, X)
-    fK = cholesky(Hermitian(K + 1e-6I))
+    K = eval_KXX(ψ, X; σn2=σn2)
+    fK = cholesky(Hermitian(K))
     y = [f(X[:,j]) for j = 1:N]
     c = fK\y
-    return RBFsurrogate(ψ, X, K, fK, y, c)
+    return RBFsurrogate(ψ, X, K, fK, y, c, σn2)
 end
 
-function fit_surrogate(ψ::RBFfun, X::Matrix{Float64}, y::Vector{Float64})
+function fit_surrogate(ψ::RBFfun, X::Matrix{Float64}, y::Vector{Float64}; σn2=1e-6)
     d, N = size(X)
-    K = eval_KXX(ψ, X)
-    fK = cholesky(Hermitian(K + 1e-6I))
+    K = eval_KXX(ψ, X, σn2=σn2)
+    fK = cholesky(Hermitian(K))
     c = fK\y
-    return RBFsurrogate(ψ, X, K, fK, y, c)
+    return RBFsurrogate(ψ, X, K, fK, y, c, σn2)
 end
 
 function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, f::Function)
@@ -38,22 +39,32 @@ function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, f::Function)
     y = vcat(s.y, f(x))
     KxX = eval_KxX(s.ψ, x, s.X)
     K = [s.K  KxX
-         KxX' eval_KXX(s.ψ, reshape(x, length(x), 1))]
-    fK = cholesky(Hermitian(K + 1e-6I))
+         KxX' eval_KXX(s.ψ, reshape(x, length(x), 1), σn2=s.σn2)]
+    fK = cholesky(Hermitian(K))
     c = fK\y
-    return RBFsurrogate(s.ψ, X, K, fK, y, c)
+    return RBFsurrogate(s.ψ, X, K, fK, y, c, s.σn2)
 end
 
-function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, y::Number)
+function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, ys::Vector{Float64})
     X = hcat(s.X, x)
-    y = vcat(s.y, y)
-    # K = eval_KXX(s.ψ, X)
+    y = ys
     KxX = eval_KxX(s.ψ, x, s.X)
     K = [s.K  KxX
-         KxX' eval_KXX(s.ψ, reshape(x, length(x), 1))]
-    fK = cholesky(Hermitian(K + 1e-6I))
+         KxX' eval_KXX(s.ψ, reshape(x, length(x), 1), σn2=s.σn2)]
+    fK = cholesky(Hermitian(K))
     c = fK\y
-    return RBFsurrogate(s.ψ, X, K, fK, y, c)
+    return RBFsurrogate(s.ψ, X, K, fK, y, c, s.σn2)
+end
+
+function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, ys::Float64)
+    X = hcat(s.X, x)
+    y = vcat(s.y, ys)
+    KxX = eval_KxX(s.ψ, x, s.X)
+    K = [s.K  KxX
+         KxX' eval_KXX(s.ψ, reshape(x, length(x), 1), σn2=s.σn2)]
+    fK = cholesky(Hermitian(K))
+    c = fK\y
+    return RBFsurrogate(s.ψ, X, K, fK, y, c, s.σn2)
 end
 
 """

@@ -98,13 +98,12 @@ function kernel_whitenoise(;σ=1e-4)
     return kernel_generic(k, [σ])
 end
 
-function kernel_matern52(θ=[1.]; σ=0.)
-    # wn = kernel_whitenoise(σ=σ)
+function kernel_matern52(θ=[1.])
     function k(ρ, θ)
         l = θ[1]
         c = sqrt(5.0) / l
         s = c*ρ
-        return (1+s*(1+s/3.0))*exp(-s) # + wn(ρ)
+        return (1+s*(1+s/3.0))*exp(-s)
     end
     return kernel_generic(k, θ)
 end
@@ -179,13 +178,13 @@ Given a radial basis function and the distance between two points, evaluate
 the covariance, gradient of covariance, and hessian of covariance with respect
 to r (pairwise distance).
 """
-function eval_Dk(rbf :: RBFfun, r; D)
-    K = eval_k(rbf, r)
-    ∇K = eval_∇k(rbf, r)
-    HK = eval_Hk(rbf, r)
-    return [K   -∇K'
-            ∇K -HK] 
-end
+# function eval_Dk(rbf :: RBFfun, r; D)
+#     K = eval_k(rbf, r)
+#     ∇K = eval_∇k(rbf, r)
+#     HK = eval_Hk(rbf, r)
+#     return [K   -∇K'
+#             ∇K -HK] 
+# end
 
 """
 Given a radial basis function and vector representing the pairwise difference
@@ -230,7 +229,7 @@ KXX = [K11 ... K1N
        .   ...  .
        KN1 ... KNN]
 """
-function eval_DKXX(rbf :: RBFfun, X::Matrix{Float64}; D::Int)
+function eval_DKXX(rbf :: RBFfun, X::Matrix{Float64}; D::Int, σn2=1e-6)
     M, N = size(X)
     nd1 = N*(D+1)
     K = zeros(nd1, nd1)
@@ -255,7 +254,7 @@ function eval_DKXX(rbf :: RBFfun, X::Matrix{Float64}; D::Int)
         end
     end
 
-    return K
+    return K + σn2*I
 end
 
 
@@ -263,7 +262,7 @@ end
 Given a radial basis function and a matrix of observations, evaluate the
 kernel matrix.
 """
-function eval_KXX(rbf::RBFfun, X::Matrix{Float64})
+function eval_KXX(rbf::RBFfun, X::Matrix{Float64}; σn2=1e-6)
     d, N = size(X)
     KXX = zeros(N, N)
     ψ0 = rbf(0.0)
@@ -277,7 +276,7 @@ function eval_KXX(rbf::RBFfun, X::Matrix{Float64})
         end
     end
 
-    return KXX
+    return KXX + σn2*I
 end
 
 """

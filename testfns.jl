@@ -16,7 +16,7 @@ end
 function tplot(f :: TestFunction)
     if f.dim == 1
         xx = range(f.bounds[1,1], f.bounds[1,2], length=250)
-        plot(xx, (x) -> f([x]))
+        plot(xx, (x) -> f([x]), label="f(x)")
         scatter!([xy[1] for xy in f.xopt], [f(xy) for xy in f.xopt], label="xopt")
     elseif f.dim == 2
         xx = range(f.bounds[1,1], f.bounds[1,2], length=100)
