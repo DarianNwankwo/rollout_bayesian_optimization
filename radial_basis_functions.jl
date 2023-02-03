@@ -47,57 +47,6 @@ function kernel_scale(kfun, θ; kwargs...)
     return RBFfun(θ, ψ, Dρ_ψ, Dρρ_ψ, ∇θ_ψ)
 end
 
-# function kernel_add(kfun1, kfun2)
-# end
-
-# function kernel_matern52(θ=[1., 1.])
-#     function k(ρ, θ)
-#         l, σ = θ[1], θ[2]
-#         c = sqrt(5.0) / l
-#         s = c*ρ
-#         return σ^2*(1+s*(1+s/3.0))*exp(-s)
-#     end
-#     return kernel_generic(k, θ)
-# end
-
-# function kernel_matern32(θ=[1., 1.])
-#     function k(ρ, θ)
-#         l, σ = θ[1], θ[2]
-#         c = sqrt(3.0) / l
-#         s = c*ρ
-#         return σ^2*(1+s)*exp(-s)
-#     end
-#     return kernel_generic(k, θ)
-# end
-
-# function kernel_matern12(θ=[1., 1.])
-#     function k(ρ, θ)
-#         l, σ = θ[1], θ[2]
-#         c = 1.0 / l
-#         s = c*ρ
-#         return σ^2*exp(-s)
-#     end
-#     return kernel_generic(k, θ)
-# end
-
-# function kernel_SE(θ=[1., 1.])
-#     function k(ρ, θ)
-#         l, σ = θ[1], θ[2]
-#         return σ^2*exp(-ρ^2/(2*l^2))
-#     end
-#     return kernel_generic(k, θ)
-# end
-
-function kernel_whitenoise(;σ=1e-4)
-    function k(ρ, θ=[σ])
-        if ρ ≈ 0
-            return θ[1]^2
-        end
-        return 0.
-    end
-    return kernel_generic(k, [σ])
-end
-
 function kernel_matern52(θ=[1.])
     function k(ρ, θ)
         l = θ[1]
