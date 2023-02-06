@@ -19,6 +19,7 @@ struct Experiment
     sgd_iterations::Int64
     batch_size::Int64
     mc_iterations::Int64
+    experiment_name::String
 end
 
 function Experiment(;
@@ -33,25 +34,21 @@ function Experiment(;
     horizon::Int64,
     sgd_iterations::Int64,
     batch_size::Int64,
-    mc_iterations::Int64)
+    mc_iterations::Int64),
+    experiment_name::String,
     return Experiment(f, ∇f, ψconstructor, θ, y, X, bounds, budget, horizon, sgd_iterations, batch_size, mc_iterations)
-end
-
-
-function run_rollout(e::Experiment)
-    println("Experiment started...")
-
-    println("Experiment completed...")
 end
 
 """
 Study the minimum observed value of the function f over the horizon for some
 given budget.
 """
-function study_minimum_observed(e::Experiment)
-    println("Experiment started...")
+function study_minimum_observed_branin()
+    println("Minimum observed study started...")
+    testfn = TestBranin()
+    θ
 
-    println("Experiment completed...")
+    println("Minimum observed studycompleted...")
 end
 
 function study_variance_reduction(e::Experiment)
@@ -77,8 +74,6 @@ function study_model_misspecification(e::Experiment)
 
     println("Experiment completed...")
 end
-
-(e::Experiment)() = run(e)
 
 # Given all of the information required to create an Experiment
 # write a function that creates an Experiment
@@ -112,7 +107,8 @@ function create_experiment()
         horizon=horizon,
         sgd_iterations=sgd_iterations,
         batch_size=batch_size,
-        mc_iterations=mc_iterations
+        mc_iterations=mc_iterations,
+        experiment_name="testing"
     )
 
     return e
