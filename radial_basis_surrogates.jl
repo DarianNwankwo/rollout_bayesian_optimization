@@ -296,31 +296,31 @@ function evalf(δs :: δRBFsurrogate, sx, δymin, fantasy_ndx)
     x = sx.x
     d, N = size(s.X)
 
-    # δsx.kx  = () -> eval_δKxX(s.ψ, x, s.X, δs.X)
-    δsx.kx = function()
-        Xknown = s.X[:, 1:fantasy_ndx-1]
-        Xfantasy = s.X[:, fantasy_ndx:end]
-        δXfantasy = δs.X[:, fantasy_ndx:end]
-        known_kx = eval_KxX(s.ψ, x, Xknown)*0
-        fantasy_kx = eval_δKxX(s.ψ, x, Xfantasy, δXfantasy)
-        return vcat(known_kx, fantasy_kx)
-    end
+    δsx.kx  = () -> eval_δKxX(s.ψ, x, s.X, δs.X)
+    # δsx.kx = function()
+    #     Xknown = s.X[:, 1:fantasy_ndx-1]
+    #     Xfantasy = s.X[:, fantasy_ndx:end]
+    #     δXfantasy = δs.X[:, fantasy_ndx:end]
+    #     known_kx = eval_KxX(s.ψ, x, Xknown)*0
+    #     fantasy_kx = eval_δKxX(s.ψ, x, Xfantasy, δXfantasy)
+    #     return vcat(known_kx, fantasy_kx)
+    # end
 
-    # δsx.∇kx = () -> eval_δ∇KxX(s.ψ, x, s.X, δs.X)
-    δsx.∇kx = function()
-        Xknown = s.X[:, 1:fantasy_ndx-1]
-        Xfantasy = s.X[:, fantasy_ndx:end]
-        δXfantasy = δs.X[:, fantasy_ndx:end]
-        known_∇kx = eval_∇KxX(s.ψ, x, Xknown)
-        fantasy_∇kx = eval_δ∇KxX(s.ψ, x, Xfantasy, δXfantasy)
-        # println("Known ∇kx: $(known_∇kx) -- Fantasy ∇kx: $(fantasy_∇kx)")
-        if fantasy_ndx == size(s.X, 2) + 1
-            # println("No fantasy yet: $(known_∇kx)")
-            return known_∇kx
-        end
-        # println("Return: $(hcat(known_∇kx, fantasy_∇kx))")
-        return hcat(known_∇kx, fantasy_∇kx)
-    end
+    δsx.∇kx = () -> eval_δ∇KxX(s.ψ, x, s.X, δs.X)
+    # δsx.∇kx = function()
+    #     Xknown = s.X[:, 1:fantasy_ndx-1]
+    #     Xfantasy = s.X[:, fantasy_ndx:end]
+    #     δXfantasy = δs.X[:, fantasy_ndx:end]
+    #     known_∇kx = eval_∇KxX(s.ψ, x, Xknown)
+    #     fantasy_∇kx = eval_δ∇KxX(s.ψ, x, Xfantasy, δXfantasy)
+    #     # println("Known ∇kx: $(known_∇kx) -- Fantasy ∇kx: $(fantasy_∇kx)")
+    #     if fantasy_ndx == size(s.X, 2) + 1
+    #         # println("No fantasy yet: $(known_∇kx)")
+    #         return known_∇kx
+    #     end
+    #     # println("Return: $(hcat(known_∇kx, fantasy_∇kx))")
+    #     return hcat(known_∇kx, fantasy_∇kx)
+    # end
 
     δsx.μ  = () -> δsx.kx'*s.c + sx.kx'*δs.c
     δsx.∇μ = () -> δsx.∇kx*s.c + sx.∇kx*δs.c
@@ -368,24 +368,24 @@ struct MultiOutputRBFsurrogate
 end
 
 function fit_multioutput_surrogate(ψ::RBFfun, X::Matrix{Float64},
-    y::Vector{Float64}; ∇xndx::Int64, ∇yndx::Int64)
+    y::Vector{Float64}; ∇xndx::Int64, ∇yndx::Int64, σn2=1e-6)
     d, N = size(X)
-    K = eval_mixed_KXX(ψ, X; j_∇=∇xndx)
+    K = eval_mixed_KXX(ψ, X; j_∇=∇xndx, σn2=σn2)
     fK = cholesky(Hermitian(K))
     c = fK\y
     return MultiOutputRBFsurrogate(ψ, X, K, fK, y, c, ∇xndx, ∇yndx)
 end
 
 function update_multioutput_surrogate(ms::MultiOutputRBFsurrogate, x::Vector{Float64},
-    y::Float64, ∇y::Vector{Float64})
+    y::Float64, ∇y::Vector{Float64}, σn2=1e-6)
     d, N = size(ms.X)
     X = hcat(ms.X, x)
 
-    Ksx = eval_mixed_KxX(ms.ψ, ms.X, x; j_∇=ms.∇xndx)
-    K = [ms.K  Ksx';
-         Ksx   eval_mixed_Kxx(ψ, x)]
-    # K = eval_mixed_KXX(ψ, X; j_∇=ms.∇xndx)
-    fK = cholesky(Hermitian(K + 1e-6I))
+    # Ksx = eval_mixed_KxX(ms.ψ, ms.X, x; j_∇=ms.∇xndx)
+    # K = [ms.K  Ksx';
+    #      Ksx   eval_mixed_Kxx(ψ, x)]
+    K = eval_mixed_KXX(ψ, X; j_∇=ms.∇xndx, σn2=σn2)
+    fK = cholesky(Hermitian(K))
 
     yprev, ∇yprev = ms.y[1:ms.∇yndx-1], ms.y[ms.∇yndx:end]
     yprev = vcat(yprev, y)

@@ -270,7 +270,7 @@ MK = [eval_KXX(...)  covmat_gat(...)
       covmat_ga(...) covmat_gg(...)]
 
 """
-function eval_mixed_KXX(rbf::RBFfun, X::Matrix{Float64}; j_∇::Int64)
+function eval_mixed_KXX(rbf::RBFfun, X::Matrix{Float64}; j_∇::Int64, σn2=1e-6)
     Xnograd = X[:, 1:j_∇]
     Xgrad = X[:, j_∇:end]
 
@@ -359,7 +359,7 @@ function eval_mixed_KXX(rbf::RBFfun, X::Matrix{Float64}; j_∇::Int64)
     K = [eval_KXX(ψ, X)           -covmat_gat(ψ, Xgrad, X);
          covmat_ga(ψ, Xgrad, X)   -covmat_gg(ψ, Xgrad)]
 
-    return K
+    return K + σn2*I
 end
 
 """
@@ -419,7 +419,7 @@ function eval_mixed_KxX(rbf::RBFfun, X::Matrix{Float64}, x::Vector{Float64};
     return K
 end
 
-function eval_mixed_Kxx(rbf::RBFfun, x::Vector{Float64})
+function eval_mixed_Kxx(rbf::RBFfun, x::Vector{Float64}; σn2=1e-6)
     d = length(x)
     K = zeros(d+1, d+1)
 
@@ -431,7 +431,7 @@ function eval_mixed_Kxx(rbf::RBFfun, x::Vector{Float64})
     K = [Kxx -∇Kx'
          ∇Kx -HKx]
 
-    return K
+    return K + σn2*I
 end
 
 """
