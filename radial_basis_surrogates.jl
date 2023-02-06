@@ -490,6 +490,25 @@ function ∇log_likelihood_v(s :: RBFsurrogate)
     ∇L
 end
 
+function optimize_hypers_optim(s::RBFsurrogate, ψconstructor)    
+    # θ contains kernel variance and lengthscale parameters [σf, l]
+    function f(θ)
+        scaled_ψ = kernel_scale(ψconstructor, θ)
+        ψref = kernel_matern52([1.])
+        lsur = fit_surrogate(scaled_ψ, s.X, s.y)
+        Lref = log_likelihood(fit_surrogate(ψref, s.X, s.y))
+        return log_likelihood(lsur)/Lref
+    end
+
+    # res = optimize(θ -> log_likelihood(fit_surrogate(θ, s.X, s.y))/Lref,
+    #                s.ψ.θ, LBFGS(), Optim.Options(show_trace=true))
+    θinit = [1., s.ψ.θ[1]]
+    lowerbounds = [1e-3, 1e-3]
+    upperbounds = [Inf, Inf]
+    res = optimize(f, lowerbounds, upperbounds, θinit)
+
+    return res
+end
 
 function optimize_hypers(θ, kernel_constructor, X, f;
                          Δ=1.0, nsteps=100, rtol=1e-6, Δmax=Inf,
