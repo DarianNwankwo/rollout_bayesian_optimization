@@ -3,6 +3,7 @@ if length(ARGS) < 2
     exit(1)
 end
 
+using Dates
 using Distributions
 using LinearAlgebra
 using Plots
@@ -10,6 +11,7 @@ using Test
 using Sobol
 using Optim
 using Random
+using Base.Filesystem
 
 include("../rollout.jl")
 include("../testfns.jl")
@@ -104,26 +106,23 @@ for random_number_stream in [lds_rns, rns]
 end
 
 
-dir = dirname(@__FILE__)
+
+filename, extension = splitext(basename(@__FILE__))
+dir_name = "plots/" * filename * "/contrived_h$(HORIZON)"
+mkpath(dir_name)
 plot_domain = range(lbs[1], ubs[1], length=length(eis[2][:, 2]))
-# ylims = (minimum(eis[2][:, 1]) - 2*maximum(eis[2][:, 2]),
-#     maximum(eis[2][:, 1]) + 2*maximum(eis[2][:, 2]))
-# ∇ylims = (minimum(∇eis[2][:, 1]) - 2*maximum(∇eis[2][:, 1]),
-#     maximum(∇eis[2][:, 1]) + 2*maximum(∇eis[2][:, 1]))
-# ∇ylims_lds = (minimum(∇eis[1][:, 1]) - 2*maximum(∇eis[1][:, 1]),
-#     maximum(∇eis[1][:, 1]) + 2*maximum(∇eis[1][:, 1]))
 
 # Save individual plot for non-low discrepancy sequence simulation
 plot(plot_domain, eis[2][:, 1], ribbons=sqrt.(eis[2][:, 2]),
     label="EI(h=$HORIZON)", linestyle=:dash#, ylims=ylims
 )
-savefig("$(dir)/plots/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES).png")
+savefig("$(dir_name)/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES).png")
 
 # Save individual plot for low discrepancy sequence simulation
 plot(plot_domain, eis[1][:, 1], ribbons=sqrt.(eis[1][:, 2]),
     label="LDS EI(h=$HORIZON)", linestyle=:dash#, ylims=ylims
 )
-savefig("$(dir)/plots/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES)_lds.png")
+savefig("$(dir_name)/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES)_lds.png")
 
 # Save plot with graphs stacked for comparison
 plot(plot_domain, eis[2][:, 1], ribbons=sqrt.(eis[2][:, 2]),
@@ -132,18 +131,18 @@ plot(plot_domain, eis[2][:, 1], ribbons=sqrt.(eis[2][:, 2]),
 plot!(plot_domain, eis[1][:, 1], ribbons=sqrt.(eis[1][:, 2]),
     label="LDS EI(h=$HORIZON)", linestyle=:dash
 )
-savefig("$(dir)/plots/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES)_stacked.png")
+savefig("$(dir_name)/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES)_stacked.png")
 
 # Save similar plots for gradients
 plot(plot_domain, ∇eis[2][:, 1], ribbons=sqrt.(∇eis[2][:, 2]),
     label="EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims
 )
-savefig("$(dir)/plots/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES).png")
+savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES).png")
 
 plot(plot_domain, ∇eis[1][:, 1], ribbons=sqrt.(∇eis[1][:, 2]),
     label="LDS EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims_lds
 )
-savefig("$(dir)/plots/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES)_lds.png")
+savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES)_lds.png")
 
 plot(plot_domain, ∇eis[2][:, 1], ribbons=sqrt.(∇eis[2][:, 2]),
     label="EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims
@@ -151,4 +150,47 @@ plot(plot_domain, ∇eis[2][:, 1], ribbons=sqrt.(∇eis[2][:, 2]),
 plot!(plot_domain, ∇eis[1][:, 1], ribbons=sqrt.(∇eis[1][:, 2]),
     label="LDS EI(h=$HORIZON)", linestyle=:dash
 )
-savefig("$(dir)/plots/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES)_stacked.png")
+savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES)_stacked.png")
+
+#######################################################
+## Save all the same plots without the error ribbons ##
+#######################################################
+# Save individual plot for non-low discrepancy sequence simulation
+plot(plot_domain, eis[2][:, 1],
+    label="EI(h=$HORIZON)", linestyle=:dash#, ylims=ylims
+)
+savefig("$(dir_name)/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES)_no_ribbons.png")
+
+# Save individual plot for low discrepancy sequence simulation
+plot(plot_domain, eis[1][:, 1],
+    label="LDS EI(h=$HORIZON)", linestyle=:dash#, ylims=ylims
+)
+savefig("$(dir_name)/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES)_lds_no_ribbons.png")
+
+# Save plot with graphs stacked for comparison
+plot(plot_domain, eis[2][:, 1],
+    label="EI(h=$HORIZON)", linestyle=:dash#, ylims=ylims
+)
+plot!(plot_domain, eis[1][:, 1],
+    label="LDS EI(h=$HORIZON)", linestyle=:dash
+)
+savefig("$(dir_name)/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES)_stacked_no_ribbons.png")
+
+# Save similar plots for gradients
+plot(plot_domain, ∇eis[2][:, 1],
+    label="EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims
+)
+savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES)_no_ribbons.png")
+
+plot(plot_domain, ∇eis[1][:, 1],
+    label="LDS EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims_lds
+)
+savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES)_lds_no_ribbons.png")
+
+plot(plot_domain, ∇eis[2][:, 1],
+    label="EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims
+)
+plot!(plot_domain, ∇eis[1][:, 1],
+    label="LDS EI(h=$HORIZON)", linestyle=:dash
+)
+savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES)_stacked_no_ribbons.png")
