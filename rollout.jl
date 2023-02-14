@@ -15,9 +15,9 @@ TODO: We should be able to use the same trajectory object to compute
 trajectory samples instead of reconstructing a new object when the location
 hasn't changed.
 """
-function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
+function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn2=1e-6,
     rnstream)
-    fbest = minimum(T.s.y)
+    fbest = T.fopt
     x0 = T.xfs[:, 1]
     
     # (Inquiry) This assumption about having gradient information might be hurting us
@@ -34,6 +34,7 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
     sx0 = T.s(x0)
     T.opt_HEI = sx0.HEI
     δsx0 = -sx0.HEI \ T.δs(sx0).∇EI
+    # δsx0 = zeros(length(x0))
 
     # Update surrogate, perturbed surrogate, and multioutput surrogate
     T.s = update_surrogate(T.s, x0, f0)
@@ -78,11 +79,6 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
     end
 end
 
-function rollout1D!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
-    rnstream)
-    
-end
-
 function sample(T::Trajectory)
     path = [(x=T.xfs[:,i], y=T.ys[i], ∇y=T.∇ys[:,i]) for i in 1:T.h+1]
     return path
@@ -98,7 +94,7 @@ end
 function α(T::Trajectory)
     m = T.fantasy_ndx-1
     path = sample(T)
-    fmini = minimum(T.s.y[1:m])
+    fmini = T.fopt
     best_ndx, best_step = best(T)
     fb = T.ys[best_ndx]
     return max(fmini - fb, 0.)
@@ -106,7 +102,7 @@ end
 
 function ∇α(T::Trajectory)
     m = T.fantasy_ndx-1
-    fmini = minimum(T.s.y[1:m])
+    fmini = T.fopt
     best_ndx, best_step = best(T)
     xb, fb, ∇fb = best_step
     if fmini <= fb

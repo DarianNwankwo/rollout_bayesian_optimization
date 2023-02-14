@@ -50,15 +50,16 @@ rns = randn(MC_SAMPLES, testfn.dim+1, HORIZON+1)
 
 # Gather initial samples/experimental data
 N, θ = 1, [.25]
-X = [.15, .85]
+σn2 = 1e-6
+X = [.05, .95]
 X = reshape(X, 1, length(X))
 ψ = kernel_scale(kernel_matern52, [1., θ...])
-sur = fit_surrogate(ψ, X, testfn.f)
+sur = fit_surrogate(ψ, X, testfn.f; σn2=σn2)
 
 domain = filter(x -> !(x in X), lbs[1]:.01:ubs[1])
 
 eis, ∇eis = [], []
-for random_number_stream in [lds_rns, rns]
+for (ndx, random_number_stream) in enumerate([lds_rns, rns])
     rollout_ei = [0 0] # Sample mean and variance tuples
     ∇rollout_ei = [0 0] # Sample mean and variance tuples
     
@@ -79,7 +80,7 @@ for random_number_stream in [lds_rns, rns]
             fantasy_ndx = size(fsur.X, 2) + 1
 
             # Rollout trajectory
-            T = Trajectory(fsur, x0, fantasy_ndx; h=HORIZON)
+            T = Trajectory(fsur, x0, fantasy_ndx; h=HORIZON, fopt=minimum(sur.y))
             rollout!(T, lbs, ubs; rnstream=random_number_stream[sample,:,:])
 
             # Evaluate rolled out trajectory
@@ -88,14 +89,17 @@ for random_number_stream in [lds_rns, rns]
         end # endfor sample
 
         # Average trajectories
-        μx = sum(αxs) / length(αxs)
-        ∇μx = sum(∇αxs) / length(αxs)
+        μx = sum(αxs) / MC_SAMPLES
+        ∇μx = sum(∇αxs) / MC_SAMPLES
         σx = sum((αxs .- μx) .^ 2) / (MC_SAMPLES-1)
         ∇σx = sum((∇αxs .- ∇μx) .^ 2) / (MC_SAMPLES-1)
 
         # Update history
-        sx = sur(x0)
-        μx += ei(sx.μ, sx.σ, minimum(sur.y)) + poi(sx.μ, sx.σ, minimum(sur.y))
+        if ndx == 1
+            # Add control variates to QMC estimates
+            sx = sur(x0)
+            μx += ei(sx.μ, sx.σ, minimum(sur.y)) + poi(sx.μ, sx.σ, minimum(sur.y))
+        end
         rollout_ei = vcat(rollout_ei, [μx σx])
         ∇rollout_ei = vcat(∇rollout_ei, [∇μx ∇σx])
     end # endfor x0
@@ -114,84 +118,96 @@ mkpath(dir_name)
 plot_domain = range(lbs[1], ubs[1], length=length(eis[2][:, 2]))
 
 # Save individual plot for non-low discrepancy sequence simulation
-plot(plot_domain, eis[2][:, 1], ribbons=sqrt.(eis[2][:, 2]), margin=5mm,
-    label="EI(h=$HORIZON)±σ", linestyle=:dash#, ylims=ylims
+plot(plot_domain, eis[2][:, 1], ribbons=sqrt.(eis[2][:, 2]) / sqrt(MC_SAMPLES), margin=10mm,
+    label="MC EI(h=$HORIZON)±σ", linestyle=:dash#, ylims=ylims
 )
+# vline!(X)
 savefig("$(dir_name)/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES).png")
 
 # Save individual plot for low discrepancy sequence simulation
-plot(plot_domain, eis[1][:, 1], ribbons=sqrt.(eis[1][:, 2]), margin=5mm,
-    label="LDS EI(h=$HORIZON)±σ", linestyle=:dash#, ylims=ylims
+plot(plot_domain, eis[1][:, 1], ribbons=sqrt.(eis[1][:, 2]) / sqrt(MC_SAMPLES), margin=10mm,
+    label="QMC EI(h=$HORIZON)±σ", linestyle=:dash#, ylims=ylims
 )
-savefig("$(dir_name)/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES)_lds.png")
+# vline!(X)
+savefig("$(dir_name)/rollout_ei_h$(HORIZON)_qmc$(MC_SAMPLES).png")
 
 # Save plot with graphs stacked for comparison
-plot(plot_domain, eis[2][:, 1], ribbons=sqrt.(eis[2][:, 2]), margin=5mm,
-    label="EI(h=$HORIZON)±σ", linestyle=:dash#, ylims=ylims
+plot(plot_domain, eis[2][:, 1], ribbons=sqrt.(eis[2][:, 2]) / sqrt(MC_SAMPLES), margin=10mm,
+    label="MC EI(h=$HORIZON)±σ", linestyle=:dash#, ylims=ylims
 )
-plot!(plot_domain, eis[1][:, 1], ribbons=sqrt.(eis[1][:, 2]), margin=5mm,
-    label="LDS EI(h=$HORIZON)±σ", linestyle=:dash
+plot!(plot_domain, eis[1][:, 1], ribbons=sqrt.(eis[1][:, 2]) / sqrt(MC_SAMPLES), margin=10mm,
+    label="QMC LDS EI(h=$HORIZON)±σ", linestyle=:dash
 )
+# vline!(X)
 savefig("$(dir_name)/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES)_stacked.png")
 
 # Save similar plots for gradients
-plot(plot_domain, ∇eis[2][:, 1], ribbons=sqrt.(∇eis[2][:, 2]), margin=5mm,
-    label="EI(h=$HORIZON)±σ", linestyle=:dash#, ylims=∇ylims
+plot(plot_domain, ∇eis[2][:, 1], ribbons=sqrt.(∇eis[2][:, 2]) / sqrt(MC_SAMPLES), margin=10mm,
+    label="MC EI(h=$HORIZON)±σ", linestyle=:dash#, ylims=∇ylims
 )
+# vline!(X)
 savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES).png")
 
-plot(plot_domain, ∇eis[1][:, 1], ribbons=sqrt.(∇eis[1][:, 2]), margin=5mm,
-    label="LDS EI(h=$HORIZON)±σ", linestyle=:dash#, ylims=∇ylims_lds
+plot(plot_domain, ∇eis[1][:, 1], ribbons=sqrt.(∇eis[1][:, 2]) / sqrt(MC_SAMPLES), margin=10mm,
+    label="QMC EI(h=$HORIZON)±σ", linestyle=:dash#, ylims=∇ylims_lds
 )
-savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES)_lds.png")
+# vline!(X)
+savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_qmc$(MC_SAMPLES).png")
 
-plot(plot_domain, ∇eis[2][:, 1], ribbons=sqrt.(∇eis[2][:, 2]), margin=5mm,
-    label="EI(h=$HORIZON)±σ", linestyle=:dash#, ylims=∇ylims
+plot(plot_domain, ∇eis[2][:, 1], ribbons=sqrt.(∇eis[2][:, 2]) / sqrt(MC_SAMPLES), margin=10mm,
+    label="MC EI(h=$HORIZON)±σ", linestyle=:dash#, ylims=∇ylims
 )
-plot!(plot_domain, ∇eis[1][:, 1], ribbons=sqrt.(∇eis[1][:, 2]), margin=5mm,
-    label="LDS EI(h=$HORIZON)±σ", linestyle=:dash
+plot!(plot_domain, ∇eis[1][:, 1], ribbons=sqrt.(∇eis[1][:, 2]) / sqrt(MC_SAMPLES), margin=10mm,
+    label="QMC EI(h=$HORIZON)±σ", linestyle=:dash
 )
+# vline!(X)
 savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES)_stacked.png")
 
 #######################################################
 ## Save all the same plots without the error ribbons ##
 #######################################################
 # Save individual plot for non-low discrepancy sequence simulation
-plot(plot_domain, eis[2][:, 1], margin=5mm,
-    label="EI(h=$HORIZON)", linestyle=:dash#, ylims=ylims
+plot(plot_domain, eis[2][:, 1], margin=10mm,
+    label="MC EI(h=$HORIZON)", linestyle=:dash#, ylims=ylims
 )
+# vline!(X)
 savefig("$(dir_name)/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES)_no_ribbons.png")
 
 # Save individual plot for low discrepancy sequence simulation
-plot(plot_domain, eis[1][:, 1], margin=5mm,
-    label="LDS EI(h=$HORIZON)", linestyle=:dash#, ylims=ylims
+plot(plot_domain, eis[1][:, 1], margin=10mm,
+    label="QMC EI(h=$HORIZON)", linestyle=:dash#, ylims=ylims
 )
-savefig("$(dir_name)/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES)_lds_no_ribbons.png")
+# vline!(X)
+savefig("$(dir_name)/rollout_ei_h$(HORIZON)_qmc$(MC_SAMPLES)_no_ribbons.png")
 
 # Save plot with graphs stacked for comparison
-plot(plot_domain, eis[2][:, 1], margin=5mm,
-    label="EI(h=$HORIZON)", linestyle=:dash#, ylims=ylims
+plot(plot_domain, eis[2][:, 1], margin=10mm,
+    label="MC EI(h=$HORIZON)", linestyle=:dash#, ylims=ylims
 )
-plot!(plot_domain, eis[1][:, 1], margin=5mm,
-    label="LDS EI(h=$HORIZON)", linestyle=:dash
+plot!(plot_domain, eis[1][:, 1], margin=10mm,
+    label="QMC EI(h=$HORIZON)", linestyle=:dash
 )
+# vline!(X)
 savefig("$(dir_name)/rollout_ei_h$(HORIZON)_mc$(MC_SAMPLES)_stacked_no_ribbons.png")
 
 # Save similar plots for gradients
-plot(plot_domain, ∇eis[2][:, 1], margin=5mm,
-    label="EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims
+plot(plot_domain, ∇eis[2][:, 1], margin=10mm,
+    label="MC EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims
 )
+# vline!(X)
 savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES)_no_ribbons.png")
 
-plot(plot_domain, ∇eis[1][:, 1], margin=5mm,
-    label="LDS EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims_lds
+plot(plot_domain, ∇eis[1][:, 1], margin=10mm,
+    label="QMC EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims_lds
 )
-savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES)_lds_no_ribbons.png")
+# vline!(X)
+savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_qmc$(MC_SAMPLES)_no_ribbons.png")
 
-plot(plot_domain, ∇eis[2][:, 1], margin=5mm,
-    label="EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims
+plot(plot_domain, ∇eis[2][:, 1], margin=10mm,
+    label="MC EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims
 )
-plot!(plot_domain, ∇eis[1][:, 1], margin=5mm,
-    label="LDS EI(h=$HORIZON)", linestyle=:dash
+plot!(plot_domain, ∇eis[1][:, 1], margin=10mm,
+    label="QMC EI(h=$HORIZON)", linestyle=:dash
 )
+# vline!(X)
 savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES)_stacked_no_ribbons.png")
