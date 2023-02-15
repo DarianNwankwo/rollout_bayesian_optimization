@@ -36,11 +36,13 @@ HORIZON = parse(Int64, ARGS[1])
 MC_SAMPLES = parse(Int64, ARGS[2])
 # USE_LOW_DISCREPANCY = parse(Int64, ARGS[3]) == 1 ? true : false
 
+σn2 = 1e-6
+
 # Setup toy problem
 testfn = TestFunction(
     1, [0. 1.], [.5],
-    x -> 0.,
-    ∇x -> [0.]
+    x -> 0. + σn2*randn(),
+    ∇x -> [0. + σn2*randn()]
 )
 lbs, ubs = testfn.bounds[:,1], testfn.bounds[:,2]
 
@@ -50,7 +52,6 @@ rns = randn(MC_SAMPLES, testfn.dim+1, HORIZON+1)
 
 # Gather initial samples/experimental data
 N, θ = 1, [.25]
-σn2 = 1e-6
 X = [.05, .95]
 X = reshape(X, 1, length(X))
 ψ = kernel_scale(kernel_matern52, [1., θ...])
