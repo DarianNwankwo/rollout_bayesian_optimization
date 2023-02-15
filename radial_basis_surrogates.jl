@@ -204,18 +204,19 @@ The initial sample from our trajectory needs a gradient sample, so this
 should only be used on the initial sample. Subsequent samples should use
 the multi-output surrogate gp_draw function.
 """
-function dgp_draw(sur::RBFsurrogate, xloc; dim, stdnormal)
-    sx = sur(xloc)
-    m = [sx.μ, sx.∇μ...]
-    Ksx = eval_DKxX(sur.ψ, xloc, sur.X, D=dim)
-    Kss = eval_Dk(sur.ψ, 0*xloc; D=dim)
-    Kxx = eval_DKXX(sur.ψ, sur.X, D=dim)
-    K = Kss - Ksx*(Kxx\Ksx')
-    L = cholesky(Matrix(Hermitian(K)), Val(true), check = false).U'
-    # L = [sx.σ  sx.∇σ';
-    #      sx.∇σ sx.Hσ]
-    sample = m + L*stdnormal
-    f, ∇f = sample[1], sample[2:end]
+function dgp_draw(sur::RBFsurrogate, xloc; dim, stdnormal, h=1e-8)
+    f = gp_draw(sur, xloc; stdnormal=stdnormal)
+    E = I(length(xloc))
+    ∇f = zeros(length(xloc))
+
+    for d in 1:length(xloc)
+        xplus = xloc + E[:, d] * h
+        xminus = xloc - E[:, d] * h
+        fplus = gp_draw(sur, xplus; stdnormal=stdnormal)
+        fminus = gp_draw(sur, xminus; stdnormal=stdnormal)
+        ∇f[d] = (fplus - fminus) / (2h)
+    end
+
     return f, ∇f
 end
 
