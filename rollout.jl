@@ -1,3 +1,4 @@
+using Plots
 using Sobol
 
 # Rename to rollout once refactor is complete
@@ -46,8 +47,11 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn
     T.xfs[:, 1] = x0
 
     # Perform rollout for the fantasized trajectories
+    ϵ = 1e-6
     s = SobolSeq(lbs, ubs)
     xstarts = reduce(hcat, next!(s) for i = 1:16)
+    xstarts = hcat(xstarts, lbs .+ ϵ)
+    xstarts = hcat(xstarts, ubs .- ϵ)
     # xstarts = randsample(10, length(∇f0), lbs, ubs) # Probably should parametrize this number
     for j in 1:T.h
         # Solve base acquisition function to determine next sample location
@@ -59,8 +63,13 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn
         # Compute variations in xnext and update surrogate, perturbed surrogate,
         # and multioutput surrogate
         sxnext = T.s(xnext)
+        # println("(h=$j)xnext: $xnext - sxnext.HEI: $(sxnext.HEI) - sxnext.EI: $(sxnext.EI)")
         # δsxnext = -sxnext.HEI \ T.δs(sxnext, T.fantasy_ndx).∇EI
-        δsxnext = -sxnext.HEI \ T.δs(sxnext).∇EI
+        δsxnext = zeros(length(xnext))
+        if sxnext.EI > 0
+            δsxnext = -sxnext.HEI \ T.δs(sxnext).∇EI
+        end
+        # δsxnext = -sxnext.HEI \ T.δs(sxnext).∇EI
 
         # Update hessian if a new best is found on trajectory
         if fi < fbest
@@ -111,4 +120,23 @@ function ∇α(T::Trajectory)
     # Investigate the computations from the ground up and 
     # see where the sign error might have been introduced
     return transpose(∇fb'*T.opt_HEI)
+end
+
+
+function visualize1D(T::Trajectory)
+    p = plot(
+        0:T.h, T.xfs[1, :], color=:red, label=nothing, xlabel="Decision Epochs (h=$(T.h))",
+        ylabel="Control Space (xʳ)", title="Trajectory Visualization in 1D",
+        xticks=(0:T.h, ["x$(i)" for i in 0:T.h]), xrotation=45, grid=false
+    )
+    vline!(0:T.h, color=:black, linestyle=:dash, linewidth=1, label=nothing, alpha=.2)
+    scatter!(0:T.h, T.xfs[1, :], color=:red, label=nothing)
+    yticks!(
+        round.(range(lbs[1], ubs[1], length=11), digits=1)
+    )
+
+    best_ndx, best_step = best(T)
+    scatter!([best_ndx-1], [best_step.x[1]], color=:green, label="Best Point")
+
+    return p
 end
