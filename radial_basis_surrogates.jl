@@ -505,7 +505,8 @@ function optimize_hypers_optim(s::RBFsurrogate, ψconstructor)
     #                s.ψ.θ, LBFGS(), Optim.Options(show_trace=true))
     θinit = [1., s.ψ.θ[1]]
     lowerbounds = [1e-3, 1e-3]
-    upperbounds = [Inf, Inf]
+    # upperbounds = [Inf, Inf]
+    upperbounds = [10., 10.]
     res = optimize(f, lowerbounds, upperbounds, θinit)
 
     return res

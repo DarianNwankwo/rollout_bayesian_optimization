@@ -49,7 +49,7 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn
     # Perform rollout for the fantasized trajectories
     ϵ = 1e-6
     s = SobolSeq(lbs, ubs)
-    xstarts = reduce(hcat, next!(s) for i = 1:16)
+    xstarts = reduce(hcat, next!(s) for i = 1:64)
     xstarts = hcat(xstarts, lbs .+ ϵ)
     xstarts = hcat(xstarts, ubs .- ϵ)
     # xstarts = randsample(10, length(∇f0), lbs, ubs) # Probably should parametrize this number
