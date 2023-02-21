@@ -140,3 +140,27 @@ function visualize1D(T::Trajectory)
 
     return p
 end
+
+
+function simulate_trajectory(sur::RBFsurrogate; x0, mc_iters, rnstream, lbs, ubs)
+    αxi, ∇αxi = 0., zeros(size(sur.X, 1))
+
+    for sample in 1:mc_iters
+        fsur = Base.deepcopy(sur)
+        fantasy_ndx = size(fsur.X, 2) + 1
+
+        # Rollout trajectory
+        T = Trajectory(fsur, x0, fantasy_ndx; h=HORIZON, fopt=minimum(sur.y))
+        rollout!(T, lbs, ubs; rnstream=rnstream[sample,:,:])
+
+        # Evaluate rolled out trajectory
+        αxi += α(T)
+        ∇αxi .+= ∇α(T)
+    end
+
+    # Average trajectories MC simulation
+    μx = αxi / mc_iters
+    ∇μx = ∇αxi / mc_iters
+
+    return μx, ∇μx
+end

@@ -159,6 +159,48 @@ function generate_batch(N; lbs, ubs)
     return B
 end
 
+function filter_batch(X, x; tol=1e-2)
+    to_keep = []
+    for j in 1:size(X, 2)
+        if norm(X[:,j] - x) > tol
+            push!(to_keep, j)
+        end
+    end
+    return X[:, to_keep]
+end
+
+function generate_batch(N, X; lbs, ubs)
+    s = SobolSeq(lbs, ubs)
+    B = reduce(hcat, next!(s) for i = 1:N*2)
+    B = convert(Matrix{Float64}, filter(x -> !(x in X), B)')
+    return B[:, 1:N]
+end
+
 function centered_fd(f, u, du, h)
     (f(u+h*du)-f(u-h*du))/(2h)
+end
+
+
+function update_x(x; λ, ∇g, lbs, ubs)
+    x = x .+ λ*∇g
+    x = max.(x, lbs)
+    x = min.(x, ubs)
+    return x
+end
+
+"""
+x0: input to function g
+∇g: gradient of function g
+λ: learning rate
+β1, β2, ϵ
+m: first moment estimate
+v: second moment estimate
+"""
+function update_x_adam(x0; ∇g,  λ, β1, β2, ϵ, m, v)
+    m = β1 * m + (1 - β1) * ∇g  # Update first moment estimate
+    v = β2 * v + (1 - β2) * ∇g.^2  # Update second moment estimate
+    m_hat = m / (1 - β1)  # Correct for bias in first moment estimate
+    v_hat = v / (1 - β2)  # Correct for bias in second moment estimate
+    x = x0 - λ * m_hat ./ (sqrt.(v_hat) .+ ϵ)  # Compute updated position
+    return x, m, v  # Return updated position and updated moment estimates
 end
