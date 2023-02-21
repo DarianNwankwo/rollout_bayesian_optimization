@@ -47,6 +47,7 @@ testfn = TestFunction(
 lbs, ubs = testfn.bounds[:,1], testfn.bounds[:,2]
 
 # Setup low discrepancy random number stream
+Random.seed!(1906)
 lds_rns = gen_low_discrepancy_sequence(MC_SAMPLES, testfn.dim, HORIZON+1)
 rns = randn(MC_SAMPLES, testfn.dim+1, HORIZON+1)
 
@@ -99,7 +100,7 @@ for (ndx, random_number_stream) in enumerate([lds_rns, rns])
         if ndx == 1
             # Add control variates to QMC estimates
             sx = sur(x0)
-            μx += ei(sx.μ, sx.σ, minimum(sur.y)) + poi(sx.μ, sx.σ, minimum(sur.y))
+            μx += ei(sx.μ, sx.σ, minimum(sur.y)) # + poi(sx.μ, sx.σ, minimum(sur.y))
         end
         rollout_ei = vcat(rollout_ei, [μx σx])
         ∇rollout_ei = vcat(∇rollout_ei, [∇μx ∇σx])

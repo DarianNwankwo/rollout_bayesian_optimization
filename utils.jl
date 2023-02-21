@@ -189,6 +189,8 @@ function update_x(x; λ, ∇g, lbs, ubs)
 end
 
 """
+This assumes stochastic gradient ascent
+
 x0: input to function g
 ∇g: gradient of function g
 λ: learning rate
@@ -196,11 +198,14 @@ x0: input to function g
 m: first moment estimate
 v: second moment estimate
 """
-function update_x_adam(x0; ∇g,  λ, β1, β2, ϵ, m, v)
+function update_x_adam(x0; ∇g,  λ, β1, β2, ϵ, m, v, lbs, ubs)
+    ∇g *= -1 
     m = β1 * m + (1 - β1) * ∇g  # Update first moment estimate
     v = β2 * v + (1 - β2) * ∇g.^2  # Update second moment estimate
     m_hat = m / (1 - β1)  # Correct for bias in first moment estimate
     v_hat = v / (1 - β2)  # Correct for bias in second moment estimate
-    x = x0 - λ * m_hat ./ (sqrt.(v_hat) .+ ϵ)  # Compute updated position
+    x = x0 + λ * m_hat ./ (sqrt.(v_hat) .+ ϵ)  # Compute updated position
+    x = max.(x, lbs)
+    x = min.(x, ubs)
     return x, m, v  # Return updated position and updated moment estimates
 end
