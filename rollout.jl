@@ -142,7 +142,7 @@ function visualize1D(T::Trajectory)
 end
 
 
-function simulate_trajectory(sur::RBFsurrogate; x0, mc_iters, rnstream, lbs, ubs)
+function simulate_trajectory(sur::RBFsurrogate; x0, mc_iters, rnstream, lbs, ubs, h)
     αxi, ∇αxi = 0., zeros(size(sur.X, 1))
 
     for sample in 1:mc_iters
@@ -150,7 +150,7 @@ function simulate_trajectory(sur::RBFsurrogate; x0, mc_iters, rnstream, lbs, ubs
         fantasy_ndx = size(fsur.X, 2) + 1
 
         # Rollout trajectory
-        T = Trajectory(fsur, x0, fantasy_ndx; h=HORIZON, fopt=minimum(sur.y))
+        T = Trajectory(fsur, x0, fantasy_ndx; h=h, fopt=minimum(sur.y))
         rollout!(T, lbs, ubs; rnstream=rnstream[sample,:,:])
 
         # Evaluate rolled out trajectory
