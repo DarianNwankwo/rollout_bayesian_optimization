@@ -1,4 +1,4 @@
-include("radial_basis_surrogates.jl")
+include("radial_basis_surrogates_update.jl")
 
 
 mutable struct Trajectory

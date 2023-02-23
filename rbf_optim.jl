@@ -1,7 +1,7 @@
 using Optim
 using Sobol
 
-include("radial_basis_surrogates.jl")
+include("radial_basis_surrogates_update.jl")
 
 
 function log_ei_solve(s::RBFsurrogate, lbs::Vector{Float64}, ubs::Vector{Float64}
