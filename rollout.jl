@@ -1,3 +1,4 @@
+using Plots
 using Sobol
 
 # Rename to rollout once refactor is complete
@@ -15,9 +16,9 @@ TODO: We should be able to use the same trajectory object to compute
 trajectory samples instead of reconstructing a new object when the location
 hasn't changed.
 """
-function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
+function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn2=1e-6,
     rnstream)
-    fbest = minimum(T.s.y)
+    fbest = T.fopt
     x0 = T.xfs[:, 1]
     
     # (Inquiry) This assumption about having gradient information might be hurting us
@@ -34,6 +35,7 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
     sx0 = T.s(x0)
     T.opt_HEI = sx0.HEI
     δsx0 = -sx0.HEI \ T.δs(sx0).∇EI
+    # δsx0 = zeros(length(x0))
 
     # Update surrogate, perturbed surrogate, and multioutput surrogate
     T.s = update_surrogate(T.s, x0, f0)
@@ -45,8 +47,11 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
     T.xfs[:, 1] = x0
 
     # Perform rollout for the fantasized trajectories
+    ϵ = 1e-6
     s = SobolSeq(lbs, ubs)
-    xstarts = reduce(hcat, next!(s) for i = 1:16)
+    xstarts = reduce(hcat, next!(s) for i = 1:64)
+    xstarts = hcat(xstarts, lbs .+ ϵ)
+    xstarts = hcat(xstarts, ubs .- ϵ)
     # xstarts = randsample(10, length(∇f0), lbs, ubs) # Probably should parametrize this number
     for j in 1:T.h
         # Solve base acquisition function to determine next sample location
@@ -58,8 +63,13 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
         # Compute variations in xnext and update surrogate, perturbed surrogate,
         # and multioutput surrogate
         sxnext = T.s(xnext)
+        # println("(h=$j)xnext: $xnext - sxnext.HEI: $(sxnext.HEI) - sxnext.EI: $(sxnext.EI)")
         # δsxnext = -sxnext.HEI \ T.δs(sxnext, T.fantasy_ndx).∇EI
-        δsxnext = -sxnext.HEI \ T.δs(sxnext).∇EI
+        δsxnext = zeros(length(xnext))
+        if sxnext.EI > 0
+            δsxnext = -sxnext.HEI \ T.δs(sxnext).∇EI
+        end
+        # δsxnext = -sxnext.HEI \ T.δs(sxnext).∇EI
 
         # Update hessian if a new best is found on trajectory
         if fi < fbest
@@ -78,11 +88,6 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
     end
 end
 
-function rollout1D!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
-    rnstream)
-    
-end
-
 function sample(T::Trajectory)
     path = [(x=T.xfs[:,i], y=T.ys[i], ∇y=T.∇ys[:,i]) for i in 1:T.h+1]
     return path
@@ -98,7 +103,7 @@ end
 function α(T::Trajectory)
     m = T.fantasy_ndx-1
     path = sample(T)
-    fmini = minimum(T.s.y[1:m])
+    fmini = T.fopt
     best_ndx, best_step = best(T)
     fb = T.ys[best_ndx]
     return max(fmini - fb, 0.)
@@ -106,7 +111,7 @@ end
 
 function ∇α(T::Trajectory)
     m = T.fantasy_ndx-1
-    fmini = minimum(T.s.y[1:m])
+    fmini = T.fopt
     best_ndx, best_step = best(T)
     xb, fb, ∇fb = best_step
     if fmini <= fb
@@ -115,4 +120,47 @@ function ∇α(T::Trajectory)
     # Investigate the computations from the ground up and 
     # see where the sign error might have been introduced
     return transpose(∇fb'*T.opt_HEI)
+end
+
+
+function visualize1D(T::Trajectory)
+    p = plot(
+        0:T.h, T.xfs[1, :], color=:red, label=nothing, xlabel="Decision Epochs (h=$(T.h))",
+        ylabel="Control Space (xʳ)", title="Trajectory Visualization in 1D",
+        xticks=(0:T.h, ["x$(i)" for i in 0:T.h]), xrotation=45, grid=false
+    )
+    vline!(0:T.h, color=:black, linestyle=:dash, linewidth=1, label=nothing, alpha=.2)
+    scatter!(0:T.h, T.xfs[1, :], color=:red, label=nothing)
+    yticks!(
+        round.(range(lbs[1], ubs[1], length=11), digits=1)
+    )
+
+    best_ndx, best_step = best(T)
+    scatter!([best_ndx-1], [best_step.x[1]], color=:green, label="Best Point")
+
+    return p
+end
+
+
+function simulate_trajectory(sur::RBFsurrogate; x0, mc_iters, rnstream, lbs, ubs)
+    αxi, ∇αxi = 0., zeros(size(sur.X, 1))
+
+    for sample in 1:mc_iters
+        fsur = Base.deepcopy(sur)
+        fantasy_ndx = size(fsur.X, 2) + 1
+
+        # Rollout trajectory
+        T = Trajectory(fsur, x0, fantasy_ndx; h=HORIZON, fopt=minimum(sur.y))
+        rollout!(T, lbs, ubs; rnstream=rnstream[sample,:,:])
+
+        # Evaluate rolled out trajectory
+        αxi += α(T)
+        ∇αxi .+= ∇α(T)
+    end
+
+    # Average trajectories MC simulation
+    μx = αxi / mc_iters
+    ∇μx = ∇αxi / mc_iters
+
+    return μx, ∇μx
 end
