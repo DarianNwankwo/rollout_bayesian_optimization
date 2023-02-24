@@ -1,5 +1,5 @@
-@everywhere using Optim
-@everywhere using Sobol
+# @everywhere using Optim
+# @everywhere using Sobol
 
 include("radial_basis_surrogates_update.jl")
 

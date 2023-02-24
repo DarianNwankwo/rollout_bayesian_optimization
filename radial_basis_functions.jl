@@ -2,8 +2,8 @@
 # TODOS:
 # - Add support for kernel transformations
 #----------------------------------------------------
-@everywhere using ForwardDiff
-@everywhere using LinearAlgebra
+# @everywhere using ForwardDiff
+# @everywhere using LinearAlgebra
 
 """
 A struct representing a radial basis function. The struct contains the

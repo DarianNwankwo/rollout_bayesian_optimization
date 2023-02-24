@@ -1,5 +1,14 @@
+using Distributed; addprocs()
 using Plots
 @everywhere using Sobol
+@everywhere using Distributions 
+@everywhere using LinearAlgebra
+@everywhere using Optim
+@everywhere using ForwardDiff
+
+if nworkers() < 8
+    addprocs(8 - nworkers())
+end
 
 # Rename to rollout once refactor is complete
 include("lazy_struct.jl")
@@ -143,7 +152,7 @@ function visualize1D(T::Trajectory)
 end
 
 
-function simulate_trajectory(sur::RBFsurrogate; x0, mc_iters, rnstream, lbs, ubs, h)
+@everywhere function simulate_trajectory(sur::RBFsurrogate; x0, mc_iters, rnstream, lbs, ubs, h)
     αxi, ∇αxi = 0., zeros(size(sur.X, 1))
 
     for sample in 1:mc_iters

@@ -1,5 +1,5 @@
-using Distributions
-using LinearAlgebra
+# using Distributions
+# using LinearAlgebra
 
 include("lazy_struct.jl")
 include("radial_basis_functions.jl")
@@ -96,7 +96,7 @@ end
 #     return RBFsurrogate(s.ψ, X, K, fK, y, c, s.σn2)
 # end
 
-function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, ys::Float64)
+@everywhere function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, ys::Float64)
     X = hcat(s.X, x)
     recover_y = s.y .+ s.ymean
     y = vcat(recover_y, ys)
@@ -114,7 +114,8 @@ end
 @TODO: Investigate using automatic differentiation to compute the gradient of the
 analytic terms.
 """
-function eval(s::RBFsurrogate, x::Vector{Float64}, ymin::Real)
+
+@everywhere function eval(s::RBFsurrogate, x::Vector{Float64}, ymin::Real)
     sx = LazyStruct()
     set(sx, :s, s)
     set(sx, :x, x)
@@ -234,8 +235,8 @@ function eval(s::RBFsurrogate, x::Vector{Float64}, ymin::Real)
     return sx
 end
 
-eval(s::RBFsurrogate, x::Vector{Float64}) = eval(s, x, minimum(s.y))
-(s::RBFsurrogate)(x::Vector{Float64}) = eval(s, x)
+@everywhere eval(s::RBFsurrogate, x::Vector{Float64}) = eval(s, x, minimum(s.y))
+@everywhere (s::RBFsurrogate)(x::Vector{Float64}) = eval(s, x)
 
 @everywhere function gp_draw(s::RBFsurrogate, xloc; stdnormal)
     sx = s(xloc)
@@ -299,7 +300,7 @@ end
     return δRBFsurrogate(us, δX, δK, δy, δc)
 end
 
-function eval(δs :: δRBFsurrogate, sx, δymin)
+@everywhere function eval(δs :: δRBFsurrogate, sx, δymin)
     δsx = LazyStruct()
     set(δsx, :sx, sx)
     set(δsx, :δymin, δymin)
@@ -327,17 +328,17 @@ function eval(δs :: δRBFsurrogate, sx, δymin)
 end
 
 
-function eval(δs :: δRBFsurrogate, sx)
+@everywhere function eval(δs :: δRBFsurrogate, sx)
     ymin, j_ymin = findmin(δs.s.y)
     δymin = δs.y[j_ymin]
     eval(δs, sx, δymin)
 end
 
 
-(δs :: δRBFsurrogate)(sx) = eval(δs, sx)
+@everywhere (δs :: δRBFsurrogate)(sx) = eval(δs, sx)
 
 
-function evalf(δs :: δRBFsurrogate, sx, δymin, fantasy_ndx)
+@everywhere function evalf(δs :: δRBFsurrogate, sx, δymin, fantasy_ndx)
     # println("Eval with fantasy ndx")
     δsx = LazyStruct()
     set(δsx, :sx, sx)
@@ -389,14 +390,14 @@ function evalf(δs :: δRBFsurrogate, sx, δymin, fantasy_ndx)
 end
 
 
-function evalf(δs :: δRBFsurrogate, sx, fantasy_ndx)
+@everywhere function evalf(δs :: δRBFsurrogate, sx, fantasy_ndx)
     ymin, j_ymin = findmin(δs.s.y)
     δymin = δs.y[j_ymin]
     evalf(δs, sx, δymin, fantasy_ndx)
 end
 
 
-(δs :: δRBFsurrogate)(sx, fantasy_ndx) = evalf(δs, sx, fantasy_ndx)
+@everywhere (δs :: δRBFsurrogate)(sx, fantasy_ndx) = evalf(δs, sx, fantasy_ndx)
 
 # ------------------------------------------------------------------
 # Operations on multi-output GP/RBF surrogate
@@ -460,7 +461,7 @@ end
 end
 
 
-function eval(ms::MultiOutputRBFsurrogate, x::Vector{Float64}, ymin::Real)
+@everywhere function eval(ms::MultiOutputRBFsurrogate, x::Vector{Float64}, ymin::Real)
     msx = LazyStruct()
     set(msx, :ms, ms)
     set(msx, :x, x)
@@ -474,17 +475,18 @@ function eval(ms::MultiOutputRBFsurrogate, x::Vector{Float64}, ymin::Real)
     return msx
 end
 
-function eval(s::MultiOutputRBFsurrogate, x::Vector{Float64})
+@everywhere function eval(s::MultiOutputRBFsurrogate, x::Vector{Float64})
     y = s.y[1:s.∇yndx-1]
     return eval(s, x, minimum(y))
 end
-(s::MultiOutputRBFsurrogate)(x::Vector{Float64}) = eval(s, x)
+@everywhere (s::MultiOutputRBFsurrogate)(x::Vector{Float64}) = eval(s, x)
 
 """
 Given a multi-output GP surrogate and a point x, draw a sample from the
 posterior distribution of the function value and its gradient at x.
 """
-function gp_draw(ms::MultiOutputRBFsurrogate, xloc; stdnormal)
+
+@everywhere function gp_draw(ms::MultiOutputRBFsurrogate, xloc; stdnormal)
     msx = ms(xloc)
     m = msx.μ
     Ksx = eval_mixed_KxX(ms.ψ, ms.X, xloc; j_∇=ms.∇xndx)
