@@ -98,19 +98,19 @@ hasn't changed.
     end
 end
 
-function sample(T::Trajectory)
+@everywhere function sample(T::Trajectory)
     path = [(x=T.xfs[:,i], y=T.ys[i], ∇y=T.∇ys[:,i]) for i in 1:T.h+1]
     return path
 end
 
-function best(T::Trajectory)
+@everywhere function best(T::Trajectory)
     # step[2] corresponds to the function value
     path = sample(T)
     _, minndx = findmin([step.y for step in path])
     return minndx, path[minndx]
 end
 
-function α(T::Trajectory)
+@everywhere function α(T::Trajectory)
     m = T.fantasy_ndx-1
     path = sample(T)
     fmini = T.fopt
@@ -119,7 +119,7 @@ function α(T::Trajectory)
     return max(fmini - fb, 0.)
 end
 
-function ∇α(T::Trajectory)
+@everywhere function ∇α(T::Trajectory)
     m = T.fantasy_ndx-1
     fmini = T.fopt
     best_ndx, best_step = best(T)

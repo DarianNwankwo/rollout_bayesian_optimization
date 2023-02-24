@@ -9,8 +9,15 @@ struct TestFunction
     ∇f
 end
 
+@everywhere struct TestFunction
+    dim
+    bounds
+    xopt
+    f
+    ∇f
+end
 
-(f :: TestFunction)(x) = f.f(x)
+@everywhere (f :: TestFunction)(x) = f.f(x)
 
 
 function tplot(f :: TestFunction)
@@ -30,14 +37,14 @@ function tplot(f :: TestFunction)
 end
 
 
-function TestRosenbrock()
+@everywhere function TestRosenbrock()
     f(xy) = (1-xy[1])^2 + 100*(xy[2]-xy[1]^2)^2
     ∇f(xy) = [-2*(1-xy[1]) - 400*xy[1]*(xy[2]-xy[1]^2), 200*(xy[2]-xy[1]^2)]
     return TestFunction(2, [-5.0 10.0 ; -5.0 10.0 ], [1.0, 1.0], f, ∇f)
 end
 
 
-function TestRastrigin(n)
+@everywhere function TestRastrigin(n)
     f(x) = 10*n + sum(x.^2 - 10*cos.(2π*x))
     ∇f(x) = 2*x + 20π*sin.(2π*x)
     bounds = zeros(n, 2)
@@ -48,7 +55,7 @@ function TestRastrigin(n)
 end
 
 
-function TestAckley(d; a=20.0, b=0.2, c=2π)
+@everywhere function TestAckley(d; a=20.0, b=0.2, c=2π)
     
     function f(x)
         nx = norm(x)
@@ -77,7 +84,7 @@ function TestAckley(d; a=20.0, b=0.2, c=2π)
 end
 
 
-function TestSixHump()
+@everywhere function TestSixHump()
 
     function f(xy)
         x = xy[1]
@@ -102,7 +109,7 @@ function TestSixHump()
 end
 
 
-function TestBranin(; a=1.0, b=5.1/(4*π^2), c=5/π, r=6.0, s=10.0, t=1.0/(8π))
+@everywhere function TestBranin(; a=1.0, b=5.1/(4*π^2), c=5/π, r=6.0, s=10.0, t=1.0/(8π))
     f(x) = a*(x[2]-b*x[1]^2+c*x[1]-r)^2 + s*(1-t)*cos(x[1]) + s
     ∇f(x) = [2*a*(x[2]-b*x[1]^2+c*x[1]-r)*(-2*b*x[1]+c) - s*(1-t)*sin(x[1]),
              2*a*(x[2]-b*x[1]^2+c*x[1]-r)]
@@ -112,7 +119,7 @@ function TestBranin(; a=1.0, b=5.1/(4*π^2), c=5/π, r=6.0, s=10.0, t=1.0/(8π))
 end
 
 
-function TestGramacyLee()
+@everywhere function TestGramacyLee()
     f(x) = sin(10π*x[1])/(2*x[1]) + (x[1]-1.0)^4
     ∇f(x) = [5π*cos(10π*x[1])/x[1] - sin(10π*x[1])/(2*x[1]^2) + 4*(x[1]-1.0)^3]
     bounds = zeros(1, 2)

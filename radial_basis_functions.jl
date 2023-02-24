@@ -28,7 +28,7 @@ end
     ∇θ_ψ::Function             # Gradient with respect to hypers
 end
 
-(rbf::RBFfun)(ρ) = rbf.ψ(ρ)
+@everywhere (rbf::RBFfun)(ρ) = rbf.ψ(ρ)
 
 """
 A generic way of constructing a radial basis functions with a given kernel
@@ -37,7 +37,8 @@ distance ρ and the hyperparameter vector θ. The kernel should be
 differentiable with respect to ρ and θ. The kernel should be positive
 definite.
 """
-function kernel_generic(k, θ)
+
+@everywhere function kernel_generic(k, θ)
     ψ(ρ) = k(ρ, θ)
     Dρ_ψ(ρ) = ForwardDiff.derivative(ψ, ρ)
     Dρρ_ψ(ρ) = ForwardDiff.derivative(Dρ_ψ, ρ)
@@ -45,7 +46,7 @@ function kernel_generic(k, θ)
     return RBFfun(θ, ψ, Dρ_ψ, Dρρ_ψ, ∇θ_ψ)
 end
 
-function kernel_scale(kfun, θ; kwargs...)
+@everywhere function kernel_scale(kfun, θ; kwargs...)
     s = θ[1]
     base_rbf = kfun(θ[2:end]; kwargs...)
     ψ(ρ)     = s * base_rbf.ψ(ρ)
@@ -55,7 +56,7 @@ function kernel_scale(kfun, θ; kwargs...)
     return RBFfun(θ, ψ, Dρ_ψ, Dρρ_ψ, ∇θ_ψ)
 end
 
-function kernel_matern52(θ=[1.])
+@everywhere function kernel_matern52(θ=[1.])
     function k(ρ, θ)
         l = θ[1]
         c = sqrt(5.0) / l
@@ -65,7 +66,7 @@ function kernel_matern52(θ=[1.])
     return kernel_generic(k, θ)
 end
 
-function kernel_matern32(θ=[1.])
+@everywhere function kernel_matern32(θ=[1.])
     function k(ρ, θ)
         l = θ[1]
         c = sqrt(3.0) / l
@@ -75,7 +76,7 @@ function kernel_matern32(θ=[1.])
     return kernel_generic(k, θ)
 end
 
-function kernel_matern12(θ=[1.])
+@everywhere function kernel_matern12(θ=[1.])
     function k(ρ, θ)
         l = θ[1]
         c = 1.0 / l
@@ -85,7 +86,7 @@ function kernel_matern12(θ=[1.])
     return kernel_generic(k, θ)
 end
 
-function kernel_SE(θ=[1.])
+@everywhere function kernel_SE(θ=[1.])
     function k(ρ, θ)
         l = θ[1]
         return exp(-ρ^2/(2*l^2))
@@ -97,7 +98,8 @@ end
 Given a radial basis function and the distances between two points, evaluate
 the kernel.
 """
-function eval_k(rbf::RBFfun, r)
+
+@everywhere function eval_k(rbf::RBFfun, r)
     ρ = norm(r)
     return rbf(ρ)
 end
@@ -106,7 +108,8 @@ end
 Given a radial basis function and the distances between two points, evaluate
 the gradient of the kernel.
 """
-function eval_∇k(rbf::RBFfun, r)
+
+@everywhere function eval_∇k(rbf::RBFfun, r)
     ρ = norm(r)
     if ρ == 0
         return 0*r
@@ -119,7 +122,8 @@ end
 Given a radial basis function and the distances between two points, evaluate
 the Hessian of the kernel.
 """
-function eval_Hk(rbf::RBFfun, r)
+
+@everywhere function eval_Hk(rbf::RBFfun, r)
     p = norm(r)
     if p > 0
         ∇p = r/p
@@ -149,7 +153,8 @@ between two sets of observations, evaluate the matrix containing the kernel
 evaluation, gradient of the kernel evaluation, and hessian of the kernel
 evaluation.
 """
-function eval_Dk(rbf::RBFfun, r::Vector{Float64}; D::Int64)
+
+@everywhere function eval_Dk(rbf::RBFfun, r::Vector{Float64}; D::Int64)
     K = eval_k(rbf, r)
     ∇K = eval_∇k(rbf, r)
     HK = eval_Hk(rbf, r)
@@ -158,7 +163,7 @@ function eval_Dk(rbf::RBFfun, r::Vector{Float64}; D::Int64)
             ∇K' -HK]
 end
 
-function eval_DKxX(rbf :: RBFfun, x::Vector{Float64},
+@everywhere function eval_DKxX(rbf :: RBFfun, x::Vector{Float64},
     X::Matrix{Float64}; D::Int)
     M, N = size(X)
     KxX = eval_Dk(rbf, x-X[:,1], D=D)
@@ -186,7 +191,8 @@ KXX = [K11 ... K1N
        .   ...  .
        KN1 ... KNN]
 """
-function eval_DKXX(rbf :: RBFfun, X::Matrix{Float64}; D::Int, σn2=1e-6)
+
+@everywhere function eval_DKXX(rbf :: RBFfun, X::Matrix{Float64}; D::Int, σn2=1e-6)
     M, N = size(X)
     nd1 = N*(D+1)
     K = zeros(nd1, nd1)
@@ -219,7 +225,8 @@ end
 Given a radial basis function and a matrix of observations, evaluate the
 kernel matrix.
 """
-function eval_KXX(rbf::RBFfun, X::Matrix{Float64}; σn2=1e-6)
+
+@everywhere function eval_KXX(rbf::RBFfun, X::Matrix{Float64}; σn2=1e-6)
     d, N = size(X)
     KXX = zeros(N, N)
     ψ0 = rbf(0.0)
@@ -240,7 +247,8 @@ end
 Given a radial basis function, a matrix X and a matrix Y, evaluate the
 covariance matrix between the two sets of observations.
 """
-function eval_KXY(rbf::RBFfun, X::Matrix{Float64}, Y::Matrix{Float64})
+
+@everywhere function eval_KXY(rbf::RBFfun, X::Matrix{Float64}, Y::Matrix{Float64})
     d, M = size(X)
     d, N = size(Y)
     KXY = zeros(M, N)
@@ -258,7 +266,8 @@ end
 Given a radial basis function and a matrix of observations, evaluate the
 covariance vector between obersations and a test point.
 """
-function eval_KxX(rbf::RBFfun, x::Vector{Float64}, X::Matrix{Float64})
+
+@everywhere function eval_KxX(rbf::RBFfun, x::Vector{Float64}, X::Matrix{Float64})
     d, N = size(X)
     KxX = zeros(N)
     
@@ -278,7 +287,8 @@ MK = [eval_KXX(...)  covmat_gat(...)
       covmat_ga(...) covmat_gg(...)]
 
 """
-function eval_mixed_KXX(rbf::RBFfun, X::Matrix{Float64}; j_∇::Int64, σn2=1e-6)
+
+@everywhere function eval_mixed_KXX(rbf::RBFfun, X::Matrix{Float64}; j_∇::Int64, σn2=1e-6)
     Xnograd = X[:, 1:j_∇]
     Xgrad = X[:, j_∇:end]
 
@@ -364,8 +374,8 @@ function eval_mixed_KXX(rbf::RBFfun, X::Matrix{Float64}; j_∇::Int64, σn2=1e-6
 
     # Our surrogate is getting the gradient computations wrong. I suspect
     # it is something to do with covmat_gat().
-    K = [eval_KXX(ψ, X)           -covmat_gat(ψ, Xgrad, X);
-         covmat_ga(ψ, Xgrad, X)   -covmat_gg(ψ, Xgrad)]
+    K = [eval_KXX(rbf, X)           -covmat_gat(rbf, Xgrad, X);
+         covmat_ga(rbf, Xgrad, X)   -covmat_gg(rbf, Xgrad)]
 
     return K + σn2*I
 end
@@ -375,7 +385,8 @@ Given a radial basis function, an arbitrary point, and a matrix of observations,
 evaluate the gradient of the covariance vector between the point and the
 observations.
 """
-function eval_∇KxX(rbf::RBFfun, x::Vector{Float64}, X::Matrix{Float64})
+
+@everywhere function eval_∇KxX(rbf::RBFfun, x::Vector{Float64}, X::Matrix{Float64})
     d, N = size(X)
     ∇KxX = zeros(d, N)
     
@@ -396,7 +407,8 @@ gradient observation and a new test location, compute the mixed covariance matri
 containing the covariances of the test locations against known locations
 and their gradient covariances.
 """
-function eval_mixed_KxX(rbf::RBFfun, X::Matrix{Float64}, x::Vector{Float64};
+
+@everywhere function eval_mixed_KxX(rbf::RBFfun, X::Matrix{Float64}, x::Vector{Float64};
     j_∇::Int64)
     d, N = size(X)
     Xgrad = X[:, j_∇:end]
@@ -427,7 +439,7 @@ function eval_mixed_KxX(rbf::RBFfun, X::Matrix{Float64}, x::Vector{Float64};
     return K
 end
 
-function eval_mixed_Kxx(rbf::RBFfun, x::Vector{Float64}; σn2=1e-6)
+@everywhere function eval_mixed_Kxx(rbf::RBFfun, x::Vector{Float64}; σn2=1e-6)
     d = length(x)
     K = zeros(d+1, d+1)
 
@@ -446,7 +458,8 @@ end
 Given a radial basis function, a matrix of observations, and a matrix
 of perturbations to the observations, evaluate the covariance matrix.
 """
-function eval_δKXX(rbf::RBFfun, X::Matrix{Float64}, δX::Matrix{Float64})
+
+@everywhere function eval_δKXX(rbf::RBFfun, X::Matrix{Float64}, δX::Matrix{Float64})
     d, N = size(X)
     δKXX = zeros(N, N)
 
@@ -466,7 +479,8 @@ Given a radial basis function, a matrix of observations X, a matrix
 of observations Y, and matrices representing their respective perturbations,
 evaluate the covariance matrix.
 """
-function eval_δKXY(rbf::RBFfun, X::Matrix{Float64}, Y::Matrix{Float64},
+
+@everywhere function eval_δKXY(rbf::RBFfun, X::Matrix{Float64}, Y::Matrix{Float64},
     δX::Matrix{Float64}, δY::Matrix{Float64})
     d, N = size(X)
     d, M = size(Y)
@@ -487,7 +501,8 @@ a matrix of observations, and a matrix of perturbations to the observations,
 evaluate the covariance vector formed by perturbations of the kernel
 hyperparameters.
 """
-function eval_δKxX(rbf::RBFfun, x::Vector{Float64}, X::Matrix{Float64},
+
+@everywhere function eval_δKxX(rbf::RBFfun, x::Vector{Float64}, X::Matrix{Float64},
     δX::Matrix{Float64})
     d, N = size(X)
     δKxX = zeros(N)
@@ -505,7 +520,8 @@ a matrix of observations, and a matrix of perturbations to the observations,
 evaluate the gradient of the covariance vector formed by perturbations of the
 kernel hyperparameters.
 """
-function eval_δ∇KxX(rbf::RBFfun, x::Vector{Float64}, X::Matrix{Float64},
+
+@everywhere function eval_δ∇KxX(rbf::RBFfun, x::Vector{Float64}, X::Matrix{Float64},
     δX::Matrix{Float64})
     d, N = size(X)
     δ∇KxX = zeros(d, N)
@@ -523,7 +539,8 @@ and a matrix of observations, evaluate the covariance matrix containing the
 pairwise covariances (including pairwise covariance gradients) between the
 arbitrary location and known observations.
 """
-function eval_DKxX(rbf::RBFfun, x::Vector{Float64}, X::Matrix{Float64}; D::Int64)
+
+@everywhere function eval_DKxX(rbf::RBFfun, x::Vector{Float64}, X::Matrix{Float64}; D::Int64)
     M, N = size(X)
     
     KxX = eval_Dk(rbf, x-X[:,1], D=D)
@@ -534,7 +551,7 @@ function eval_DKxX(rbf::RBFfun, x::Vector{Float64}, X::Matrix{Float64}; D::Int64
     return KxX
 end
 
-function eval_Dθ_KXX(rbf::RBFfun, X::Matrix{Float64}, δθ::Vector{Float64})
+@everywhere function eval_Dθ_KXX(rbf::RBFfun, X::Matrix{Float64}, δθ::Vector{Float64})
     d, N = size(X)
     δKXX = zeros(N, N)
     δψ0 = rbf.∇θ_ψ(0.0)' * δθ

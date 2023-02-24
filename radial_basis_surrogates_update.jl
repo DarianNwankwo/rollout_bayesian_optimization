@@ -447,7 +447,7 @@ end
     # Ksx = eval_mixed_KxX(ms.ψ, ms.X, x; j_∇=ms.∇xndx)
     # K = [ms.K  Ksx';
     #      Ksx   eval_mixed_Kxx(ψ, x)]
-    K = eval_mixed_KXX(ψ, X; j_∇=ms.∇xndx, σn2=σn2)
+    K = eval_mixed_KXX(ms.ψ, X; j_∇=ms.∇xndx, σn2=σn2)
     fK = cholesky(Hermitian(K))
 
     yprev, ∇yprev = ms.y[1:ms.∇yndx-1], ms.y[ms.∇yndx:end]
