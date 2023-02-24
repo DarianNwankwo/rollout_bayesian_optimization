@@ -1,10 +1,10 @@
-using Optim
-using Sobol
+@everywhere using Optim
+@everywhere using Sobol
 
 include("radial_basis_surrogates_update.jl")
 
 
-function log_ei_solve(s::RBFsurrogate, lbs::Vector{Float64}, ubs::Vector{Float64}
+@everywhere function log_ei_solve(s::RBFsurrogate, lbs::Vector{Float64}, ubs::Vector{Float64}
     , xstart::Vector{Float64})
     fun(x) = -s(x).logEI
     function fun_grad!(g, x)
@@ -29,7 +29,7 @@ function log_ei_solve(s::RBFsurrogate, lbs::Vector{Float64}, ubs::Vector{Float64
     return Optim.minimizer(res), res
 end
 
-function ei_solve(s::RBFsurrogate, lbs::Vector{Float64}, ubs::Vector{Float64}
+@everywhere function ei_solve(s::RBFsurrogate, lbs::Vector{Float64}, ubs::Vector{Float64}
     , xstart::Vector{Float64})
     fun(x) = -s(x).EI
     function fun_grad!(g, x)
@@ -54,7 +54,7 @@ function ei_solve(s::RBFsurrogate, lbs::Vector{Float64}, ubs::Vector{Float64}
     return Optim.minimizer(res), res
 end
 
-function multistart_ei_solve(s::RBFsurrogate, lbs::Vector{Float64},
+@everywhere function multistart_ei_solve(s::RBFsurrogate, lbs::Vector{Float64},
     ubs::Vector{Float64}, xstarts::Matrix{Float64})
     candidates = []
     

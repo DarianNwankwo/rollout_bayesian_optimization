@@ -18,6 +18,38 @@ struct RBFsurrogate
     ymean::Float64
 end
 
+@everywhere struct RBFsurrogate
+    ψ::RBFfun
+    X::Matrix{Float64}
+    K::Matrix{Float64}
+    fK::Cholesky
+    y::Vector{Float64}
+    c::Vector{Float64}
+    σn2::Float64
+    ymean::Float64
+end
+
+function plot1D(s::RBFsurrogate; domain)
+    p = scatter(s.X', s.y .+ s.ymean, label="Observations")
+    plot!(
+        p,
+        domain,
+        [s([x]).μ + s.ymean for x in domain],
+        ribbons=2*[s([x]).σ for x in domain],
+        label="μ±2σ"
+    )
+    return p
+end
+
+function plot1DEI(s::RBFsurrogate; domain)
+    p = plot(
+        domain,
+        [s([x]).EI for x in domain],
+        label="EI"
+    )
+    return p
+end
+
 function fit_surrogate(ψ::RBFfun, X::Matrix{Float64}, f::Function; σn2=1e-6)
     d, N = size(X)
     K = eval_KXX(ψ, X; σn2=σn2)
@@ -33,13 +65,13 @@ function fit_surrogate(ψ::RBFfun, X::Matrix{Float64}, y::Vector{Float64}; σn2=
     d, N = size(X)
     K = eval_KXX(ψ, X, σn2=σn2)
     fK = cholesky(Hermitian(K))
-    c = fK\y
     ymean = mean(y)
     y = y .- ymean
+    c = fK\y
     return RBFsurrogate(ψ, X, K, fK, y, c, σn2, ymean)
 end
 
-function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, f::Function)
+@everywhere function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, f::Function)
     X = hcat(s.X, x)
     recover_y = s.y .+ s.ymean
     y = vcat(recover_y, f(x))
@@ -205,7 +237,7 @@ end
 eval(s::RBFsurrogate, x::Vector{Float64}) = eval(s, x, minimum(s.y))
 (s::RBFsurrogate)(x::Vector{Float64}) = eval(s, x)
 
-function gp_draw(s::RBFsurrogate, xloc; stdnormal)
+@everywhere function gp_draw(s::RBFsurrogate, xloc; stdnormal)
     sx = s(xloc)
     return sx.μ + sx.σ*stdnormal
 end
@@ -241,6 +273,14 @@ struct δRBFsurrogate
     c::Vector{Float64}
 end
 
+@everywhere struct δRBFsurrogate
+    s::RBFsurrogate
+    X::Matrix{Float64}
+    K::Matrix{Float64}
+    y::Vector{Float64}
+    c::Vector{Float64}
+end
+
 function fit_δsurrogate(s::RBFsurrogate, δX::Matrix{Float64}, ∇f::Function)
     d, N = size(s.X)
     δK = eval_δKXX(s.ψ, s.X, δX)
@@ -249,7 +289,7 @@ function fit_δsurrogate(s::RBFsurrogate, δX::Matrix{Float64}, ∇f::Function)
     return δRBFsurrogate(s, δX, δK, δy, δc)
 end
 
-function update_δsurrogate(us::RBFsurrogate, δs::δRBFsurrogate, 
+@everywhere function update_δsurrogate(us::RBFsurrogate, δs::δRBFsurrogate, 
     δx::Vector{Float64}, ∇y::Vector{Float64})
     d, N = size(us.X)
     δX = hcat(δs.X, δx)
@@ -378,6 +418,17 @@ struct MultiOutputRBFsurrogate
     ∇yndx::Int64
 end
 
+@everywhere struct MultiOutputRBFsurrogate
+    ψ::RBFfun
+    X::Matrix{Float64}
+    K::Matrix{Float64}
+    fK::Cholesky
+    y::Vector{Float64}
+    c::Vector{Float64}
+    ∇xndx::Int64
+    ∇yndx::Int64
+end
+
 function fit_multioutput_surrogate(ψ::RBFfun, X::Matrix{Float64},
     y::Vector{Float64}; ∇xndx::Int64, ∇yndx::Int64, σn2=1e-6)
     d, N = size(X)
@@ -387,7 +438,7 @@ function fit_multioutput_surrogate(ψ::RBFfun, X::Matrix{Float64},
     return MultiOutputRBFsurrogate(ψ, X, K, fK, y, c, ∇xndx, ∇yndx)
 end
 
-function update_multioutput_surrogate(ms::MultiOutputRBFsurrogate, x::Vector{Float64},
+@everywhere function update_multioutput_surrogate(ms::MultiOutputRBFsurrogate, x::Vector{Float64},
     y::Float64, ∇y::Vector{Float64}, σn2=1e-6)
     d, N = size(ms.X)
     X = hcat(ms.X, x)
@@ -515,7 +566,7 @@ function optimize_hypers_optim(s::RBFsurrogate, ψconstructor)
     #                s.ψ.θ, LBFGS(), Optim.Options(show_trace=true))
     θinit = [1., s.ψ.θ[1]]
     lowerbounds = [1e-3, 1e-3]
-    upperbounds = [Inf, Inf]
+    upperbounds = [10, 10]
     res = optimize(f, lowerbounds, upperbounds, θinit)
 
     return res

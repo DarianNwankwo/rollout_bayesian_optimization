@@ -2,8 +2,8 @@
 # TODOS:
 # - Add support for kernel transformations
 #----------------------------------------------------
-using ForwardDiff
-using LinearAlgebra
+@everywhere using ForwardDiff
+@everywhere using LinearAlgebra
 
 """
 A struct representing a radial basis function. The struct contains the
@@ -13,6 +13,14 @@ function with respect to the distance, and the gradient of the kernel function
 with respect to the hyperparameter vector.
 """
 struct RBFfun
+    θ::Vector{Float64}         # Hyperparameter vector
+    ψ::Function                # Radial basis function
+    Dρ_ψ::Function             # Derivative of the RBF wrt ρ
+    Dρρ_ψ::Function            # Second derivative
+    ∇θ_ψ::Function             # Gradient with respect to hypers
+end
+
+@everywhere struct RBFfun
     θ::Vector{Float64}         # Hyperparameter vector
     ψ::Function                # Radial basis function
     Dρ_ψ::Function             # Derivative of the RBF wrt ρ

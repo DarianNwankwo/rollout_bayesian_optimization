@@ -1,5 +1,5 @@
 using Plots
-using Sobol
+@everywhere using Sobol
 
 # Rename to rollout once refactor is complete
 include("lazy_struct.jl")
@@ -16,7 +16,8 @@ TODO: We should be able to use the same trajectory object to compute
 trajectory samples instead of reconstructing a new object when the location
 hasn't changed.
 """
-function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn2=1e-6,
+
+@everywhere function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn2=1e-6,
     rnstream)
     fbest = T.fopt
     x0 = T.xfs[:, 1]

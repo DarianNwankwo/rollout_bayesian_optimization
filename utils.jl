@@ -1,3 +1,4 @@
+using Distributed
 using Distributions
 using Sobol
 
@@ -181,7 +182,7 @@ function centered_fd(f, u, du, h)
 end
 
 
-function update_x(x; λ, ∇g, lbs, ubs)
+@everywhere function update_x(x; λ, ∇g, lbs, ubs)
     x = x .+ λ*∇g
     x = max.(x, lbs)
     x = min.(x, ubs)
@@ -198,7 +199,8 @@ x0: input to function g
 m: first moment estimate
 v: second moment estimate
 """
-function update_x_adam(x0; ∇g,  λ, β1, β2, ϵ, m, v, lbs, ubs)
+
+@everywhere function update_x_adam(x0; ∇g,  λ, β1, β2, ϵ, m, v, lbs, ubs)
     ∇g *= -1 
     m = β1 * m + (1 - β1) * ∇g  # Update first moment estimate
     v = β2 * v + (1 - β2) * ∇g.^2  # Update second moment estimate
