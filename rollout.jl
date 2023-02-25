@@ -160,7 +160,7 @@ end
         fantasy_ndx = size(fsur.X, 2) + 1
 
         # Rollout trajectory
-        T = Trajectory(fsur, x0, fantasy_ndx; h=h, fopt=minimum(sur.y))
+        T = Trajectory(fsur, x0, fantasy_ndx; h=h, fopt=minimum(sur.y) + sur.ymean)
         rollout!(T, lbs, ubs; rnstream=rnstream[sample,:,:])
 
         # Evaluate rolled out trajectory

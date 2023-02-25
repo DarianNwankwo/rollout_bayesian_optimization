@@ -272,6 +272,7 @@ struct δRBFsurrogate
     K::Matrix{Float64}
     y::Vector{Float64}
     c::Vector{Float64}
+    ymean::Float64
 end
 
 @everywhere struct δRBFsurrogate
@@ -280,14 +281,17 @@ end
     K::Matrix{Float64}
     y::Vector{Float64}
     c::Vector{Float64}
+    ymean::Float64
 end
 
 function fit_δsurrogate(s::RBFsurrogate, δX::Matrix{Float64}, ∇f::Function)
     d, N = size(s.X)
     δK = eval_δKXX(s.ψ, s.X, δX)
     δy = [dot(∇f(s.X[:,j]), δX[:,j]) for j=1:N]
+    δymean = mean(δy)
+    δy .-= δymean
     δc = s.fK \ (δy - δK*s.c)
-    return δRBFsurrogate(s, δX, δK, δy, δc)
+    return δRBFsurrogate(s, δX, δK, δy, δc, δymean)
 end
 
 @everywhere function update_δsurrogate(us::RBFsurrogate, δs::δRBFsurrogate, 
@@ -295,9 +299,14 @@ end
     d, N = size(us.X)
     δX = hcat(δs.X, δx)
     δK = eval_δKXX(us.ψ, us.X, δX)
+    # recover_δy = δs.y .+ δs.ymean
+    # δy = vcat(recover_δy, dot(∇y, δx))
+    # δymean = mean(δy)
+    δymean = 0.
+    # δy .-= δymean
     δy = vcat(δs.y, dot(∇y, δx))
     δc = us.fK\(δy - δK*us.c)
-    return δRBFsurrogate(us, δX, δK, δy, δc)
+    return δRBFsurrogate(us, δX, δK, δy, δc, δymean)
 end
 
 @everywhere function eval(δs :: δRBFsurrogate, sx, δymin)
@@ -417,6 +426,8 @@ struct MultiOutputRBFsurrogate
     c::Vector{Float64}
     ∇xndx::Int64
     ∇yndx::Int64
+    ymean::Float64
+    ∇ymean::Vector{Float64}
 end
 
 @everywhere struct MultiOutputRBFsurrogate
@@ -428,6 +439,8 @@ end
     c::Vector{Float64}
     ∇xndx::Int64
     ∇yndx::Int64
+    ymean::Float64
+    ∇ymean::Vector{Float64}
 end
 
 function fit_multioutput_surrogate(ψ::RBFfun, X::Matrix{Float64},
@@ -435,8 +448,11 @@ function fit_multioutput_surrogate(ψ::RBFfun, X::Matrix{Float64},
     d, N = size(X)
     K = eval_mixed_KXX(ψ, X; j_∇=∇xndx, σn2=σn2)
     fK = cholesky(Hermitian(K))
+    ymean = mean(y)
+    y = y .- mean(y)
     c = fK\y
-    return MultiOutputRBFsurrogate(ψ, X, K, fK, y, c, ∇xndx, ∇yndx)
+    ∇ymean = zeros(d)
+    return MultiOutputRBFsurrogate(ψ, X, K, fK, y, c, ∇xndx, ∇yndx, ymean, ∇ymean)
 end
 
 @everywhere function update_multioutput_surrogate(ms::MultiOutputRBFsurrogate, x::Vector{Float64},
@@ -450,14 +466,36 @@ end
     K = eval_mixed_KXX(ms.ψ, X; j_∇=ms.∇xndx, σn2=σn2)
     fK = cholesky(Hermitian(K))
 
+    # Grab the function values and derivatives from the previous
     yprev, ∇yprev = ms.y[1:ms.∇yndx-1], ms.y[ms.∇yndx:end]
-    yprev = vcat(yprev, y)
-    ∇yprev = vcat(∇yprev, ∇y)
+
+    # Recover the inherent mean of the function values and derivatives
+    recover_yprev = yprev .+ ms.ymean
+    recover_∇yprev = []
+    if length(∇yprev) > 0
+        recover_∇yprev = ∇yprev .+ repeat(ms.∇ymean, length(∇yprev)/d) 
+    end
+
+    # Update the mean of the function values with the new observation
+    yprev = vcat(recover_yprev, y)
+    yprevmean = mean(yprev)
+    yprev = yprev .- yprevmean
+
+    # Update the mean of the derivatives with the new observation
+    ∇yprev = vcat(recover_∇yprev, ∇y)
+    ∇yprevmean = zeros(d)
+    for i in 1:Int64(length(∇yprev) / d)
+        ∇yprevmean = ∇yprevmean .+ ∇yprev[(i-1)*d+1:i*d]
+    end
+    ∇yprevmean = ∇yprevmean ./ length(∇yprev)
+
+    # Concatenate the values back into a single vector
     y = vcat(yprev, ∇yprev)
+    y = convert(Vector{Float64}, y)
 
     ∇yndx = length(yprev) + 1
     c = fK\y
-    return MultiOutputRBFsurrogate(ms.ψ, X, K, fK, y, c, ms.∇xndx, ∇yndx)
+    return MultiOutputRBFsurrogate(ms.ψ, X, K, fK, y, c, ms.∇xndx, ∇yndx, yprevmean, ∇yprevmean)
 end
 
 
