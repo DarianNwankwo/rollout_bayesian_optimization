@@ -211,3 +211,35 @@ v: second moment estimate
     x = min.(x, ubs)
     return x, m, v  # Return updated position and updated moment estimates
 end
+
+@everywhere function update_x_nesterov(x0; ∇g, λ, μ)
+    look_ahead = x0 + μ * v
+end
+
+function nesterov_update(w, grad, v, lr, mu)
+    # Compute the gradient at the look-ahead point
+    look_ahead = w + mu * v
+    grad_look_ahead = grad(look_ahead)
+
+    # Update the velocity
+    v = mu * v + lr * grad_look_ahead
+
+    # Update the model parameters
+    w = w + v
+
+    return w, v
+end
+
+
+function ei(μ, σ, fbest)
+    z = (fbest - μ) / σ
+    Φz = Distributions.normcdf(z)
+    ϕz = Distributions.normpdf(z)
+    return σ*(z*Φz + ϕz)
+end
+
+function poi(μ, σ, fbest)
+    z = (fbest - μ) / σ
+    Φz = Distributions.normcdf(z)
+    return Φz
+end

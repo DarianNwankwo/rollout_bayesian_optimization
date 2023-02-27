@@ -54,6 +54,10 @@ end
     return Optim.minimizer(res), res
 end
 
+"""
+It would be better to do this in parallel.
+"""
+
 @everywhere function multistart_ei_solve(s::RBFsurrogate, lbs::Vector{Float64},
     ubs::Vector{Float64}, xstarts::Matrix{Float64})
     candidates = []
