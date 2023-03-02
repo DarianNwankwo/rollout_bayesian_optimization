@@ -182,7 +182,7 @@ function centered_fd(f, u, du, h)
 end
 
 
-@everywhere function update_x(x; λ, ∇g, lbs, ubs)
+function update_x(x; λ, ∇g, lbs, ubs)
     x = x .+ λ*∇g
     x = max.(x, lbs)
     x = min.(x, ubs)
@@ -199,8 +199,7 @@ x0: input to function g
 m: first moment estimate
 v: second moment estimate
 """
-
-@everywhere function update_x_adam(x0; ∇g,  λ, β1, β2, ϵ, m, v, lbs, ubs)
+function update_x_adam(x0; ∇g,  λ, β1, β2, ϵ, m, v, lbs, ubs)
     ∇g *= -1 
     m = β1 * m + (1 - β1) * ∇g  # Update first moment estimate
     v = β2 * v + (1 - β2) * ∇g.^2  # Update second moment estimate
@@ -212,7 +211,7 @@ v: second moment estimate
     return x, m, v  # Return updated position and updated moment estimates
 end
 
-@everywhere function update_x_nesterov(x0; ∇g, λ, μ)
+function update_x_nesterov(x0; ∇g, λ, μ)
     look_ahead = x0 + μ * v
 end
 

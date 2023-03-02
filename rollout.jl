@@ -1,14 +1,15 @@
-using Distributed; addprocs()
+using Distributed
 using Plots
-@everywhere using Sobol
-@everywhere using Distributions 
-@everywhere using LinearAlgebra
-@everywhere using Optim
-@everywhere using ForwardDiff
+using Sobol
+using Distributions 
+using LinearAlgebra
+using Optim
+using ForwardDiff
 
-if nworkers() < 8
-    addprocs(8 - nworkers())
-end
+# addprocs()
+# if nworkers() < 8
+#     addprocs(8 - nworkers())
+# end
 
 # Rename to rollout once refactor is complete
 include("lazy_struct.jl")
@@ -26,7 +27,7 @@ trajectory samples instead of reconstructing a new object when the location
 hasn't changed.
 """
 
-@everywhere function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn2=1e-6,
+function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn2=1e-6,
     rnstream)
     fbest = T.fopt
     x0 = T.xfs[:, 1]
@@ -98,19 +99,19 @@ hasn't changed.
     end
 end
 
-@everywhere function sample(T::Trajectory)
+function sample(T::Trajectory)
     path = [(x=T.xfs[:,i], y=T.ys[i], ∇y=T.∇ys[:,i]) for i in 1:T.h+1]
     return path
 end
 
-@everywhere function best(T::Trajectory)
+function best(T::Trajectory)
     # step[2] corresponds to the function value
     path = sample(T)
     _, minndx = findmin([step.y for step in path])
     return minndx, path[minndx]
 end
 
-@everywhere function α(T::Trajectory)
+function α(T::Trajectory)
     m = T.fantasy_ndx-1
     path = sample(T)
     fmini = T.fopt
@@ -119,7 +120,7 @@ end
     return max(fmini - fb, 0.)
 end
 
-@everywhere function ∇α(T::Trajectory)
+function ∇α(T::Trajectory)
     m = T.fantasy_ndx-1
     fmini = T.fopt
     best_ndx, best_step = best(T)
@@ -152,7 +153,7 @@ function visualize1D(T::Trajectory)
 end
 
 
-@everywhere function simulate_trajectory(sur::RBFsurrogate; x0, mc_iters, rnstream, lbs, ubs, h)
+function simulate_trajectory(sur::RBFsurrogate; x0, mc_iters, rnstream, lbs, ubs, h)
     αxi, ∇αxi = 0., zeros(size(sur.X, 1))
 
     for sample in 1:mc_iters

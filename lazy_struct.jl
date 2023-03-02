@@ -19,19 +19,13 @@ struct LazyStruct
     LazyStruct(s :: LazyStruct) = new(copy(s.thunks), copy(s.values))
 end
 
-@everywhere struct LazyStruct
-    thunks
-    values
-    LazyStruct() = new(Dict(), Dict())
-    LazyStruct(s :: LazyStruct) = new(copy(s.thunks), copy(s.values))
-end
 
 """
 When a property is set on the LazyStruct, we store it as a thunk. The thunk
 set is typically a function that returns the value of the property.
 """
 
-@everywhere function Base.setproperty!(s :: LazyStruct, v :: Symbol, f::Function)
+function Base.setproperty!(s :: LazyStruct, v :: Symbol, f::Function)
     thunks = getfield(s, :thunks)
     thunks[v] = f
     delete!(getfield(s, :values), v)
@@ -45,7 +39,7 @@ return it.  If it is not in either table, we return the value of the property
 in the struct itself.
 """
 
-@everywhere function Base.getproperty(s :: LazyStruct, v :: Symbol)
+function Base.getproperty(s :: LazyStruct, v :: Symbol)
     values = getfield(s, :values)
     thunks = getfield(s, :thunks)
     if haskey(values, v)
@@ -62,6 +56,6 @@ We can also set values directly, without using a thunk.  This is useful for
 values that are not computed lazily.
 """
 
-@everywhere function set(s :: LazyStruct, k :: Symbol, v)
+function set(s :: LazyStruct, k :: Symbol, v)
     getfield(s, :values)[k] = v
 end

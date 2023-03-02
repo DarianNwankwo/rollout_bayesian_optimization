@@ -18,17 +18,6 @@ struct RBFsurrogate
     ymean::Float64
 end
 
-@everywhere struct RBFsurrogate
-    ψ::RBFfun
-    X::Matrix{Float64}
-    K::Matrix{Float64}
-    fK::Cholesky
-    y::Vector{Float64}
-    c::Vector{Float64}
-    σn2::Float64
-    ymean::Float64
-end
-
 function plot1D(s::RBFsurrogate; domain)
     p = scatter(s.X', s.y .+ s.ymean, label="Observations")
     plot!(
@@ -71,7 +60,7 @@ function fit_surrogate(ψ::RBFfun, X::Matrix{Float64}, y::Vector{Float64}; σn2=
     return RBFsurrogate(ψ, X, K, fK, y, c, σn2, ymean)
 end
 
-@everywhere function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, f::Function)
+function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, f::Function)
     X = hcat(s.X, x)
     recover_y = s.y .+ s.ymean
     y = vcat(recover_y, f(x))
@@ -96,7 +85,7 @@ end
 #     return RBFsurrogate(s.ψ, X, K, fK, y, c, s.σn2)
 # end
 
-@everywhere function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, ys::Float64)
+function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, ys::Float64)
     X = hcat(s.X, x)
     recover_y = s.y .+ s.ymean
     y = vcat(recover_y, ys)
@@ -115,7 +104,7 @@ end
 analytic terms.
 """
 
-@everywhere function eval(s::RBFsurrogate, x::Vector{Float64}, ymin::Real)
+function eval(s::RBFsurrogate, x::Vector{Float64}, ymin::Real)
     sx = LazyStruct()
     set(sx, :s, s)
     set(sx, :x, x)
@@ -235,10 +224,10 @@ analytic terms.
     return sx
 end
 
-@everywhere eval(s::RBFsurrogate, x::Vector{Float64}) = eval(s, x, minimum(s.y))
-@everywhere (s::RBFsurrogate)(x::Vector{Float64}) = eval(s, x)
+eval(s::RBFsurrogate, x::Vector{Float64}) = eval(s, x, minimum(s.y))
+(s::RBFsurrogate)(x::Vector{Float64}) = eval(s, x)
 
-@everywhere function gp_draw(s::RBFsurrogate, xloc; stdnormal)
+function gp_draw(s::RBFsurrogate, xloc; stdnormal)
     sx = s(xloc)
     return sx.μ + sx.σ*stdnormal
 end
@@ -275,15 +264,6 @@ struct δRBFsurrogate
     ymean::Float64
 end
 
-@everywhere struct δRBFsurrogate
-    s::RBFsurrogate
-    X::Matrix{Float64}
-    K::Matrix{Float64}
-    y::Vector{Float64}
-    c::Vector{Float64}
-    ymean::Float64
-end
-
 function fit_δsurrogate(s::RBFsurrogate, δX::Matrix{Float64}, ∇f::Function)
     d, N = size(s.X)
     δK = eval_δKXX(s.ψ, s.X, δX)
@@ -294,7 +274,7 @@ function fit_δsurrogate(s::RBFsurrogate, δX::Matrix{Float64}, ∇f::Function)
     return δRBFsurrogate(s, δX, δK, δy, δc, δymean)
 end
 
-@everywhere function update_δsurrogate(us::RBFsurrogate, δs::δRBFsurrogate, 
+function update_δsurrogate(us::RBFsurrogate, δs::δRBFsurrogate, 
     δx::Vector{Float64}, ∇y::Vector{Float64})
     d, N = size(us.X)
     δX = hcat(δs.X, δx)
@@ -309,7 +289,7 @@ end
     return δRBFsurrogate(us, δX, δK, δy, δc, δymean)
 end
 
-@everywhere function eval(δs :: δRBFsurrogate, sx, δymin)
+function eval(δs :: δRBFsurrogate, sx, δymin)
     δsx = LazyStruct()
     set(δsx, :sx, sx)
     set(δsx, :δymin, δymin)
@@ -337,17 +317,17 @@ end
 end
 
 
-@everywhere function eval(δs :: δRBFsurrogate, sx)
+function eval(δs :: δRBFsurrogate, sx)
     ymin, j_ymin = findmin(δs.s.y)
     δymin = δs.y[j_ymin]
     eval(δs, sx, δymin)
 end
 
 
-@everywhere (δs :: δRBFsurrogate)(sx) = eval(δs, sx)
+(δs :: δRBFsurrogate)(sx) = eval(δs, sx)
 
 
-@everywhere function evalf(δs :: δRBFsurrogate, sx, δymin, fantasy_ndx)
+function evalf(δs :: δRBFsurrogate, sx, δymin, fantasy_ndx)
     # println("Eval with fantasy ndx")
     δsx = LazyStruct()
     set(δsx, :sx, sx)
@@ -399,14 +379,14 @@ end
 end
 
 
-@everywhere function evalf(δs :: δRBFsurrogate, sx, fantasy_ndx)
+function evalf(δs :: δRBFsurrogate, sx, fantasy_ndx)
     ymin, j_ymin = findmin(δs.s.y)
     δymin = δs.y[j_ymin]
     evalf(δs, sx, δymin, fantasy_ndx)
 end
 
 
-@everywhere (δs :: δRBFsurrogate)(sx, fantasy_ndx) = evalf(δs, sx, fantasy_ndx)
+(δs :: δRBFsurrogate)(sx, fantasy_ndx) = evalf(δs, sx, fantasy_ndx)
 
 # ------------------------------------------------------------------
 # Operations on multi-output GP/RBF surrogate
@@ -418,19 +398,6 @@ function values and derivatives, i.e. y = [f(x1), f(x2), ..., f(xN),
 index of the derivatives in the vector y.
 """
 struct MultiOutputRBFsurrogate
-    ψ::RBFfun
-    X::Matrix{Float64}
-    K::Matrix{Float64}
-    fK::Cholesky
-    y::Vector{Float64}
-    c::Vector{Float64}
-    ∇xndx::Int64
-    ∇yndx::Int64
-    ymean::Float64
-    ∇ymean::Vector{Float64}
-end
-
-@everywhere struct MultiOutputRBFsurrogate
     ψ::RBFfun
     X::Matrix{Float64}
     K::Matrix{Float64}
@@ -455,7 +422,7 @@ function fit_multioutput_surrogate(ψ::RBFfun, X::Matrix{Float64},
     return MultiOutputRBFsurrogate(ψ, X, K, fK, y, c, ∇xndx, ∇yndx, ymean, ∇ymean)
 end
 
-@everywhere function update_multioutput_surrogate(ms::MultiOutputRBFsurrogate, x::Vector{Float64},
+function update_multioutput_surrogate(ms::MultiOutputRBFsurrogate, x::Vector{Float64},
     y::Float64, ∇y::Vector{Float64}, σn2=1e-6)
     d, N = size(ms.X)
     X = hcat(ms.X, x)
@@ -473,7 +440,8 @@ end
     recover_yprev = yprev .+ ms.ymean
     recover_∇yprev = []
     if length(∇yprev) > 0
-        recover_∇yprev = ∇yprev .+ repeat(ms.∇ymean, length(∇yprev)/d) 
+        reps = Int64(length(∇yprev) / d)
+        recover_∇yprev = ∇yprev .+ repeat(ms.∇ymean, reps)
     end
 
     # Update the mean of the function values with the new observation
@@ -499,7 +467,7 @@ end
 end
 
 
-@everywhere function eval(ms::MultiOutputRBFsurrogate, x::Vector{Float64}, ymin::Real)
+function eval(ms::MultiOutputRBFsurrogate, x::Vector{Float64}, ymin::Real)
     msx = LazyStruct()
     set(msx, :ms, ms)
     set(msx, :x, x)
@@ -513,18 +481,18 @@ end
     return msx
 end
 
-@everywhere function eval(s::MultiOutputRBFsurrogate, x::Vector{Float64})
+function eval(s::MultiOutputRBFsurrogate, x::Vector{Float64})
     y = s.y[1:s.∇yndx-1]
     return eval(s, x, minimum(y))
 end
-@everywhere (s::MultiOutputRBFsurrogate)(x::Vector{Float64}) = eval(s, x)
+(s::MultiOutputRBFsurrogate)(x::Vector{Float64}) = eval(s, x)
 
 """
 Given a multi-output GP surrogate and a point x, draw a sample from the
 posterior distribution of the function value and its gradient at x.
 """
 
-@everywhere function gp_draw(ms::MultiOutputRBFsurrogate, xloc; stdnormal)
+function gp_draw(ms::MultiOutputRBFsurrogate, xloc; stdnormal)
     msx = ms(xloc)
     m = msx.μ
     Ksx = eval_mixed_KxX(ms.ψ, ms.X, xloc; j_∇=ms.∇xndx)
