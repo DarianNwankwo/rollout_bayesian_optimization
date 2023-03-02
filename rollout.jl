@@ -27,7 +27,7 @@ trajectory samples instead of reconstructing a new object when the location
 hasn't changed.
 """
 
-function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn2=1e-6,
+function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn2=1e-6, objective=:EI, num_starts=64
     rnstream)
     fbest = T.fopt
     x0 = T.xfs[:, 1]
@@ -60,13 +60,20 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn
     # Perform rollout for the fantasized trajectories
     ϵ = 1e-6
     s = SobolSeq(lbs, ubs)
-    xstarts = reduce(hcat, next!(s) for i = 1:64)
+
+    # Update constant 64 to be a function argument
+
+    xstarts = reduce(hcat, next!(s) for i = 1:num_starts)
     xstarts = hcat(xstarts, lbs .+ ϵ)
     xstarts = hcat(xstarts, ubs .- ϵ)
-    # xstarts = randsample(10, length(∇f0), lbs, ubs) # Probably should parametrize this number
+    xnext = zeros(length(x0))
     for j in 1:T.h
         # Solve base acquisition function to determine next sample location
-        xnext = multistart_ei_solve(T.s, lbs, ubs, xstarts)
+        if objective == :EI
+            xnext = multistart_ei_solve(T.s, lbs, ubs, xstarts)
+        else
+            xnext = multistart_log_ei_solve(T.s, lbs, ubs, xstarts)
+        end
 
         # Draw fantasized sample at proposed location after base acquisition solve
         fi, ∇fi = gp_draw(T.ms, xnext; stdnormal=rnstream[:, j+1])
