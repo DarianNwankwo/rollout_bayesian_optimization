@@ -27,7 +27,7 @@ trajectory samples instead of reconstructing a new object when the location
 hasn't changed.
 """
 
-function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn2=1e-6, objective=:EI, num_starts=64
+function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn2=1e-6, objective=:EI, num_starts=64,
     rnstream)
     fbest = T.fopt
     x0 = T.xfs[:, 1]
@@ -61,8 +61,6 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn
     ϵ = 1e-6
     s = SobolSeq(lbs, ubs)
 
-    # Update constant 64 to be a function argument
-
     xstarts = reduce(hcat, next!(s) for i = 1:num_starts)
     xstarts = hcat(xstarts, lbs .+ ϵ)
     xstarts = hcat(xstarts, ubs .- ϵ)
@@ -81,8 +79,6 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn
         # Compute variations in xnext and update surrogate, perturbed surrogate,
         # and multioutput surrogate
         sxnext = T.s(xnext)
-        # println("(h=$j)xnext: $xnext - sxnext.HEI: $(sxnext.HEI) - sxnext.EI: $(sxnext.EI)")
-        # δsxnext = -sxnext.HEI \ T.δs(sxnext, T.fantasy_ndx).∇EI
         δsxnext = zeros(length(xnext))
         if sxnext.EI > 0
             δsxnext = -sxnext.HEI \ T.δs(sxnext).∇EI

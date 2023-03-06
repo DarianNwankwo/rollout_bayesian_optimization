@@ -1,19 +1,24 @@
 # Parse command line arguments
 cli_args = ["HORIZON", "MC_SAMPLES", "BUDGET", "NUM_TRIALS", "TESTFUNC_NAME", "TESTFUNC_ARGS"]
 if length(ARGS) != length(cli_args)
-    str_resp = "Usage: julia bayesopt1d.jl "
+    local str_builder = "Usage: julia bayesopt1d.jl "
     for arg in cli_args
-        str_resp *= "<$arg> "
+        str_builder *= "<$arg> "
     end
-    println(str_resp)
+    println(str_builder)
     exit(1)
 end
 
+using Distributed
 using Distributions
 using LinearAlgebra
 using Plots
 using Sobol
 using Random
+
+addprocs()
+println("Total Workers: $(nworkers())")
+exit(1)
 
 include("../rollout.jl")
 include("../testfns.jl")
@@ -36,7 +41,7 @@ testfn = testfns[func_name](func_args...)
 
 # Global parameters
 MAX_SGD_ITERS = 500
-BATCH_SIZE = 32
+BATCH_SIZE = 4
 HORIZON = parse(Int64, ARGS[1])
 MC_SAMPLES = parse(Int64, ARGS[2])
 BUDGET = parse(Int64, ARGS[3])
@@ -56,21 +61,20 @@ lds_rns = gen_low_discrepancy_sequence(MC_SAMPLES, testfn.dim, HORIZON+1);
 θ, output_var = [1.], 1.
 ψ = kernel_scale(kernel_matern52, [output_var, θ...]);
 
+# Generate batch of locations to perform SGA on
+batch = generate_batch(BATCH_SIZE; lbs=lbs, ubs=ubs)
+
 for trial in 1:NUM_TRIALS
     # Setup structures for collection trial data
     X = reshape(initial_samples[:, trial], testfn.dim, 1)
     sur = fit_surrogate(ψ, X, testfn.f; σn2=σn2)
 
-    # Generate batch of locations to perform SGA on
-    batch = generate_batch(BATCH_SIZE; lbs=lbs, ubs=ubs)
-
     for budget in 1:BUDGET
-        # Optimize each batch location in parallel
-        batch_results = @distributed (append!) for j = 1:size(batch, 2)
-            # Setup parameters for gradient ascent for each process
-            
+        # # Optimize each batch location in parallel
+        # batch_results = @distributed (append!) for j = 1:size(batch, 2)
+        #     # Setup parameters for gradient ascent for each process
+        # end
 
-        end
     end
     # Update collective data
 end
