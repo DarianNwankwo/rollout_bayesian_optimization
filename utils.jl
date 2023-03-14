@@ -200,7 +200,6 @@ m: first moment estimate
 v: second moment estimate
 """
 function update_x_adam(x0; ∇g,  λ, β1, β2, ϵ, m, v, lbs, ubs)
-    ∇g *= -1 
     m = β1 * m + (1 - β1) * ∇g  # Update first moment estimate
     v = β2 * v + (1 - β2) * ∇g.^2  # Update second moment estimate
     m_hat = m / (1 - β1)  # Correct for bias in first moment estimate
@@ -211,22 +210,37 @@ function update_x_adam(x0; ∇g,  λ, β1, β2, ϵ, m, v, lbs, ubs)
     return x, m, v  # Return updated position and updated moment estimates
 end
 
-function update_x_nesterov(x0; ∇g, λ, μ)
-    look_ahead = x0 + μ * v
-end
+function stochastic_gradient_ascent_adam(x0;
+    λ=0.01, β1=0.9, β2=0.999, ϵ=1e-8, ftol=1e-6, gtol=1e-6,
+    sur, max_sgd_iters, lbs, ubs, mc_iters, lds_rns, horizon)
+    m = zeros(size(x0))
+    v = zeros(size(x0))
+    xstart = x0
 
-function nesterov_update(w, grad, v, lr, mu)
-    # Compute the gradient at the look-ahead point
-    look_ahead = w + mu * v
-    grad_look_ahead = grad(look_ahead)
+    objs, grads, obj_old = [], [], -Inf
+    iters = 1
 
-    # Update the velocity
-    v = mu * v + lr * grad_look_ahead
+    for epoch in 1:max_sgd_iters
+        # Compute stochastic estimates of function and gradient
+        μx, ∇μx = simulate_trajectory(sur;
+            mc_iters=mc_iters, rnstream=lds_rns, lbs=lbs, ubs=ubs, x0=x0, h=horizon
+        )
+        # Update position and moment estimates
+        x0, m, v = update_x_adam(x0; ∇g=∇μx, λ=λ, β1=β1, β2=β2, ϵ=ϵ, m=m, v=v, lbs=lbs, ubs=ubs)
+        # Store computed objective
+        push!(objs, μx)
+        push!(grads, ∇μx)
 
-    # Update the model parameters
-    w = w + v
+        # Check for convergence
+        if abs(objs[end] - obj_old) < ftol || norm(grads[end]) < gtol
+            iters = epoch
+            break
+        end
 
-    return w, v
+        obj_old = objs[end]
+    end
+
+    return (start=xstart, finish=x0, final_obj=objs[end], final_grad=grads[end], iters=iters)
 end
 
 

@@ -45,8 +45,14 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn
     end
     sx0 = T.s(x0)
     T.opt_HEI = sx0.HEI
-    δsx0 = -sx0.HEI \ T.δs(sx0).∇EI
     # δsx0 = zeros(length(x0))
+    # try
+    #     δsx0 = -sx0.HEI \ T.δs(sx0).∇EI
+    # catch e
+    #     println("HEI: $(sx0.HEI) -- EI: $(sx0.EI) -- x0: $(x0)")
+    #     exit(1)
+    # end
+    δsx0 = -sx0.HEI \ T.δs(sx0).∇EI
 
     # Update surrogate, perturbed surrogate, and multioutput surrogate
     T.s = update_surrogate(T.s, x0, f0)
@@ -157,6 +163,7 @@ end
 
 
 function simulate_trajectory(sur::RBFsurrogate; x0, mc_iters, rnstream, lbs, ubs, h)
+    sx = sur(x0)
     αxi, ∇αxi = 0., zeros(size(sur.X, 1))
 
     for sample in 1:mc_iters
@@ -176,5 +183,5 @@ function simulate_trajectory(sur::RBFsurrogate; x0, mc_iters, rnstream, lbs, ubs
     μx = αxi / mc_iters
     ∇μx = ∇αxi / mc_iters
 
-    return μx, ∇μx
+    return μx + sx.EI, ∇μx
 end

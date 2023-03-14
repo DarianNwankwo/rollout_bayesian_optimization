@@ -8,4 +8,5 @@ function create_experiment_directory(filename, nested_dirs)
     end
 
     mkpath(dir_name)
+    return dir_name
 end

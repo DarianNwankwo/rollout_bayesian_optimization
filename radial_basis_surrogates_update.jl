@@ -39,6 +39,10 @@ function plot1DEI(s::RBFsurrogate; domain)
     return p
 end
 
+function recover_y(s::RBFsurrogate)
+    return s.y .+ s.ymean
+end
+
 function fit_surrogate(ψ::RBFfun, X::Matrix{Float64}, f::Function; σn2=1e-6)
     d, N = size(X)
     K = eval_KXX(ψ, X; σn2=σn2)
@@ -560,21 +564,21 @@ function ∇log_likelihood_v(s :: RBFsurrogate)
     ∇L
 end
 
-function optimize_hypers_optim(s::RBFsurrogate, ψconstructor)    
+function optimize_hypers_optim(s::RBFsurrogate, ψconstructor; σn2=1e-6)    
     # θ contains kernel variance and lengthscale parameters [σf, l]
     function f(θ)
         scaled_ψ = kernel_scale(ψconstructor, θ)
         ψref = kernel_matern52([1.])
-        lsur = fit_surrogate(scaled_ψ, s.X, s.y)
-        Lref = log_likelihood(fit_surrogate(ψref, s.X, s.y))
+        lsur = fit_surrogate(scaled_ψ, s.X, s.y; σn2=σn2)
+        Lref = log_likelihood(fit_surrogate(ψref, s.X, s.y; σn2=σn2))
         return log_likelihood(lsur)/Lref
     end
 
     # res = optimize(θ -> log_likelihood(fit_surrogate(θ, s.X, s.y))/Lref,
     #                s.ψ.θ, LBFGS(), Optim.Options(show_trace=true))
     θinit = [1., s.ψ.θ[1]]
-    lowerbounds = [1e-3, 1e-3]
-    upperbounds = [10, 10]
+    lowerbounds = [.9, 1e-3]
+    upperbounds = [1.1, 10]
     res = optimize(f, lowerbounds, upperbounds, θinit)
 
     return res
