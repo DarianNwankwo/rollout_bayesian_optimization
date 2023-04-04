@@ -1,56 +1,108 @@
-# Parse command line arguments
-cli_args = ["HORIZON", "MC_SAMPLES", "BUDGET", "NUM_TRIALS", "TESTFUNC_NAME", "TESTFUNC_ARGS"]
-if length(ARGS) < length(cli_args) - 1
-    local str_builder = "Usage: julia bayesopt1d.jl "
-    for arg in cli_args
-        str_builder *= "<$arg> "
+using ArgParse
+
+function parse_command_line(args)
+    parser = ArgParseSettings("Bayesian Optimization CLI")
+
+    @add_arg_table! parser begin
+        "--horizon"
+            action = :store_arg
+            help = "Horizon (default: 0)"
+            default = 0
+            arg_type = Int
+        "--mc-samples"
+            action = :store_arg
+            help = "Monte Carlo samples (default: 25)"
+            default = 25
+            arg_type = Int
+        "--budget"
+            action = :store_arg
+            help = "Budget (default: 15)"
+            default = 15
+            arg_type = Int
+        "--num-trials"
+            action = :store_arg
+            help = "Number of trials (default: 15)"
+            default = 15
+            arg_type = Int
+        "--sgd-iters"
+            action = :store_arg
+            help = "SGD iterations (default: 100)"
+            default = 100
+            arg_type = Int
+        "--batch-size"
+            action = :store_arg
+            help = "Batch size (default: 32)"
+            default = 32
+            arg_type = Int
+        "--function-name"
+            action = :store_arg
+            help = "Function name"
+            required = true
+        "--function-args"
+            action = :store_arg
+            help = "Function args"
+            default = nothing
     end
-    println(str_builder)
-    exit(1)
+
+    parsed_args = parse_args(args, parser)
+    return parsed_args
 end
 
+cli_args = parse_command_line(ARGS)
+
 using Measures
-using Distributed
+# using Distributed
 using Distributions
 using LinearAlgebra
 using Plots
 using SharedArrays
 using Sobol
 using Random
+using CSV
+using Tables
+using DataFrames
 
-addprocs()
-println("Total Workers: $(nworkers())")
+# addprocs()
+# println("Total Workers: $(nworkers())")
 
-@everywhere include("../rollout.jl")
-@everywhere include("../testfns.jl")
-@everywhere include("./utils.jl")
+# @everywhere include("../rollout.jl")
+# @everywhere include("../testfns.jl")
+# @everywhere include("./utils.jl")
+include("../rollout.jl")
+include("../testfns.jl")
+include("./utils.jl")
 
 Random.seed!(1906 + 1867 + 1865)
 
 # Test function mappings
 testfns = Dict(
-    "gramacy_lee" => TestGramacyLee,
+    "gramacylee" => TestGramacyLee,
     "rastrigin" => TestRastrigin,
     "ackley" => TestAckley,
+    "rosenbrock" => TestRosenbrock,
+    "sixhump" => TestSixHump,
+    "braninhoo" => TestBraninHoo,
 )
 
 # Get function name and arguments
-func_name = ARGS[5]
-func_args = length(ARGS) > 5 ? ARGS[6:end] : []
-func_args = length(func_args) >= 1 ? [parse(Int64, arg) for arg in func_args] : []
-testfn = testfns[func_name](func_args...)
+# fargs = isnothing(cli_args["function-args"]) ? [] : split(cli_args["function-args"], ",")
+# fargs = length(fargs) > 0 ? map(eacharg -> parse(Float64, eacharg), fargs) : []
+func_name = cli_args["function-name"]
+func_args = isnothing(cli_args["function-args"]) ? [] : split(cli_args["function-args"], ",")
+func_args = length(func_args) > 0 ? map(eacharg -> parse(Int64, eacharg), func_args) : []
 
 # Global parameters
-MAX_SGD_ITERS = 500
-BATCH_SIZE = 64
-HORIZON = parse(Int64, ARGS[1])
-MC_SAMPLES = parse(Int64, ARGS[2])
-BUDGET = parse(Int64, ARGS[3])
-NUM_TRIALS = parse(Int64, ARGS[4])
+MAX_SGD_ITERS = cli_args["sgd-iters"]
+BATCH_SIZE = cli_args["batch-size"]
+HORIZON = cli_args["horizon"]
+MC_SAMPLES = cli_args["mc-samples"]
+BUDGET = cli_args["budget"]
+NUM_TRIALS = cli_args["num-trials"]
 
 # Setup toy problem
 testfn = testfns[func_name](func_args...)
 lbs, ubs = testfn.bounds[:,1], testfn.bounds[:,2]
+fbest = testfn.f(first(testfn.xopt))
 
 # Get NUM_TRIALS initial samples
 initial_samples = randsample(NUM_TRIALS, testfn.dim, lbs, ubs)
@@ -64,140 +116,81 @@ lds_rns = gen_low_discrepancy_sequence(MC_SAMPLES, testfn.dim, HORIZON+1);
 
 # Generate batch of locations to perform SGA on
 batch = generate_batch(BATCH_SIZE; lbs=lbs, ubs=ubs)
+gaps = zeros(NUM_TRIALS, BUDGET+2) # +2 for initial gap and row index
+gaps[:, 1] = cumsum(ones(NUM_TRIALS))
+
 
 for trial in 1:NUM_TRIALS
-    global batch_results = []
     # Setup structures for collection trial data
     X = reshape(initial_samples[:, trial], testfn.dim, 1)
     sur = fit_surrogate(ψ, X, testfn.f; σn2=σn2) # (TODO): Learn kernel hyperparameters
 
-    filename, extension = splitext(basename(@__FILE__))
-    dirs = [func_name]
-    dir_name = create_experiment_directory(filename, dirs)
-
-    domain = filter(x -> !(x in sur.X), lbs[1]:.01:ubs[1])
-
     println("Beginning Bayesian Optimization Main Loop")
     println("-----------------------------------------")
     for budget in 1:BUDGET
-        plot1DEI(sur; domain=domain)
-        plot!(margin=10mm)
-        savefig("$dir_name/$(filename)_$(func_name)_h$(HORIZON)_$(MC_SAMPLES)_budget$(BUDGET)_trial$(trial)_ei.png")
         println("Iteration #$budget")
         # Optimize each batch location in parallel
         results = []
 
-        results = @distributed (append!) for j = 1:size(batch, 2)
-            # Setup parameters for gradient ascent for each process
-            xbegin, xend = batch[:, j], batch[:, j]
-            vt, γ, η = zeros(testfn.dim), .9, .01
-            ϵgrad, ϵfunc, num_increases_count = 1e-8, 1e-8, 0
-            num_increases = 3
-            αxs, ∇αxs = [], []
-            iters = 1
-
-            # Main loop for Stochastic Gradient Ascent
-            # TODO: Figure out why gradient estimates are very negative at 1.1
+        # results = @distributed (append!) for j = 1:size(batch, 2)
+        #     try
+        #         x0 = batch[:, j]
+        #         res = stochastic_gradient_ascent_adam(x0;
+        #             max_sgd_iters=MAX_SGD_ITERS, lbs=lbs, ubs=ubs, mc_iters=MC_SAMPLES,
+        #             lds_rns=lds_rns, horizon=HORIZON, sur=sur, gtol=1e-10, ftol=1e-8, max_counter=10
+        #         )
+        #         res
+        #     catch e
+        #         continue
+        #     end
+        # end # END @distributed
+        for j = 1:size(batch, 2)
+            x0 = batch[:, j]
             try
-                for epoch in 1:MAX_SGD_ITERS
-                    # Compute stochastic estimates of acquisition function and gradient
-                    μx, ∇μx = 0., zeros(testfn.dim)
-                    x0 = xend + γ*vt
-                    x0 = max.(x0, lbs)
-                    x0 = min.(x0, ubs)
-                    μx, ∇μx = simulate_trajectory(
-                        sur; mc_iters=MC_SAMPLES, rnstream=lds_rns, lbs=lbs, ubs=ubs, x0=x0, h=HORIZON
-                    )
-                    # Perform update rule for nesterov accelerated gradient
-                    vt = γ*vt + η*∇μx
-                    xend = xend + vt
-                    xend = max.(xend, lbs)
-                    xend = min.(xend, ubs)
-
-                    # Cache values
-                    if xbegin == [1.1]
-                        println("$epoch.) μx: $μx - ∇μx: $∇μx - xend: $xend -- x0: $x0")
-                    end
-                    push!(αxs, μx)
-                    push!(∇αxs, ∇μx)
-
-                    # Check for convergence
-                    iters = epoch
-                    if epoch > 1 && abs(αxs[end] - αxs[end-1]) < ϵfunc
-                        num_increases_count += 1
-                        if num_increases_count >= num_increases
-                            break
-                        end
-                    end
-                end # END for epoch in 1:MAX_SGD_ITERS
-
-                # println("Finished SGD for xbegin. length(αxs): $(length(αxs))")
-                if length(αxs) > 0
-                    # push!(results, (start=xbegin, finish=xend, func=αxs[end], grad=∇αxs[end], iters=iters))
-                    [(start=xbegin, finish=xend, func=αxs[end], grad=∇αxs[end], iters=iters)]
-                end  
-                catch err
-                    println("Error: $err")
-                    println("-----------------------------------------")
-                    println("Initial location x0=$xbegin is too close to some point in X=$(sur.X)\n")
-                    [(start=xbegin, finish=xend, func=-Inf, grad=[-Inf], iters=iters)]
-                end
-        end # END @distributed
+                res = stochastic_gradient_ascent_adam(x0;
+                    max_sgd_iters=MAX_SGD_ITERS, lbs=lbs, ubs=ubs, mc_iters=MC_SAMPLES,
+                    lds_rns=lds_rns, horizon=HORIZON, sur=sur, gtol=1e-10, ftol=1e-8, max_counter=10
+                )
+                push!(results, res)
+            catch e
+                continue
+            end
+        end
         
-        global batch_results = shuffle(results)
-        for (ndx, res) in enumerate(batch_results)
-            println("#$ndx: start=$(res.start), finish=$(res.finish), func=$(res.func), grad=$(res.grad), iters=$(res.iters)")
+        if length(results) == 0
+            start = finish = rand(testfn.dim) .* (ubs - lbs) + lbs
+            push!(results, (start=start, finish=finish, final_obj=nothing, final_grad=nothing, iters=0))
         end
 
         # Update surrogate with element that optimize the acquisition function
-        max_ndx = findmax(t -> t.func, batch_results)[2]
-        max_pairing = batch_results[max_ndx]
+        max_ndx = findmax(t -> t.final_obj, results)[2]
+        max_pairing = results[max_ndx]
         xnew = max_pairing.finish
-        recover_y = sur.y .+ sur.ymean
+        native_y = recover_y(sur)
 
-        sur = fit_surrogate(
-            ψ,
-            hcat(sur.X, xnew),
-            vcat(recover_y, testfn.f(xnew));
-            σn2=σn2
-        )
-        println("Updated X: $(sur.X)\n")
+        sur = fit_surrogate(ψ, hcat(sur.X, xnew), vcat(native_y, testfn.f(xnew)); σn2=σn2)
         res = optimize_hypers_optim(sur, kernel_matern52; σn2=σn2)
         σ, ℓ = Optim.minimizer(res)
         global ψ = kernel_scale(kernel_matern52, [σ, ℓ])
-
-        recover_y = sur.y .+ sur.ymean
-        sur = fit_surrogate(ψ, sur.X, recover_y; σn2=σn2)
+        native_y = recover_y(sur)
+        sur = fit_surrogate(ψ, sur.X, native_y; σn2=σn2)
     end # END Bayesian Optimization Loop
     println("-----------------------------------------")
+    
     # Update collective data
-
-    # filename, extension = splitext(basename(@__FILE__))
-    # dirs = [func_name]
-    # dir_name = create_experiment_directory(filename, dirs)
-
-    # domain = filter(x -> !(x in sur.X), lbs[1]:.01:ubs[1])
-    plot1D(sur; domain=domain)
-    plot!(margin=10mm)
-    savefig("$dir_name/$(filename)_$(func_name)_h$(HORIZON)_$(MC_SAMPLES)_budget$(BUDGET)_trial$(trial).png")
-
-    # plot1DEI(sur; domain=domain)
-    # plot!(margin=10mm)
-    # savefig("$dir_name/$(filename)_$(func_name)_h$(HORIZON)_$(MC_SAMPLES)_budget$(BUDGET)_trial$(trial)_ei.png")
-
-    println("Saving results to $dir_name")
+    gaps[trial, 2:end] = measure_gap(sur, fbest)
 end
 
 
-# filename, extension = splitext(basename(@__FILE__))
-# dirs = [func_name]
-# dir_name = create_experiment_directory(filename, dirs)
+filename, extension = splitext(basename(@__FILE__))
+dirs = [func_name]
+dir_name = create_experiment_directory(filename, dirs)
 
-# domain = filter(x -> !(x in sur.X), lbs[1]:.01:ubs[1])
-# plot1D(sur; domain=domain)
-# savefig("$dir_name/$(filename)_$(func_name)_$(func_args)_$(HORIZON)_$(MC_SAMPLES)_$(BUDGET)_$(NUM_TRIALS).png")
-
-# plot1DEI(sur; domain=domain)
-# savefig("$dir_name/$(filename)_$(func_name)_$(func_args)_$(HORIZON)_$(MC_SAMPLES)_$(BUDGET)_$(NUM_TRIALS)_ei.png")
-
-# println("Saving results to $dir_name")
+csv_filename = create_filename(cli_args)
+csv_headers = vcat(["trial_number"], ["budget_$i" for i in 1:BUDGET+1])
+CSV.write(
+    string(dir_name, "/", csv_filename),
+    Tables.table(gaps),
+    header=csv_headers,
+    writeheader=true
+)
