@@ -29,11 +29,28 @@ function tplot(f :: TestFunction)
     end
 end
 
+function TestBraninHoo(; a=1, b=5.1/(4π^2), c=5/π, r=6, s=10, t=1/(8π))
+    function f(xy)
+        x = xy[1]
+        y = xy[2]
+        a*(y-b*x^2+c*x-r)^2 + s*(1-t)*cos(x) + s
+    end
+    function ∇f(xy)
+        x = xy[1]
+        y = xy[2]
+        dx = 2*a*(y-b*x^2+c*x-r)*(-b*2*x+c) - s*(1-t)*sin(x)
+        dy = 2*a*(y-b*x^2+c*x-r)
+        [dx, dy]
+    end
+    bounds = [-5.0 10.0 ; 0.0 15.0]
+    xopt = ([-π, 12.275], [π, 2.275], [9.42478, 2.475])
+    return TestFunction(2, bounds, xopt, f, ∇f)
+end
 
 function TestRosenbrock()
     f(xy) = (1-xy[1])^2 + 100*(xy[2]-xy[1]^2)^2
     ∇f(xy) = [-2*(1-xy[1]) - 400*xy[1]*(xy[2]-xy[1]^2), 200*(xy[2]-xy[1]^2)]
-    return TestFunction(2, [-5.0 10.0 ; -5.0 10.0 ], [1.0, 1.0], f, ∇f)
+    return TestFunction(2, [-5.0 10.0 ; -5.0 10.0 ], ([1.0, 1.0],), f, ∇f)
 end
 
 

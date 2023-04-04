@@ -564,21 +564,25 @@ function ∇log_likelihood_v(s :: RBFsurrogate)
     ∇L
 end
 
+# Surrogate isn't necessary here. Just need X, theta, and y.
 function optimize_hypers_optim(s::RBFsurrogate, ψconstructor; σn2=1e-6)    
     # θ contains kernel variance and lengthscale parameters [σf, l]
     function f(θ)
-        scaled_ψ = kernel_scale(ψconstructor, θ)
-        ψref = kernel_matern52([1.])
-        lsur = fit_surrogate(scaled_ψ, s.X, s.y; σn2=σn2)
-        Lref = log_likelihood(fit_surrogate(ψref, s.X, s.y; σn2=σn2))
-        return log_likelihood(lsur)/Lref
+        # println("θ = $θ")
+        # scaled_ψ = kernel_scale(ψconstructor, θ) # uncomment if using kernel variance in optimization
+        ψ = kernel_scale(ψconstructor, θ)
+        # ψref = kernel_matern52([1.])
+        lsur = fit_surrogate(ψ, s.X, s.y; σn2=σn2)
+        # Lref = log_likelihood(fit_surrogate(ψref, s.X, s.y; σn2=σn2))
+        return -log_likelihood(lsur)
     end
 
-    # res = optimize(θ -> log_likelihood(fit_surrogate(θ, s.X, s.y))/Lref,
-    #                s.ψ.θ, LBFGS(), Optim.Options(show_trace=true))
-    θinit = [1., s.ψ.θ[1]]
-    lowerbounds = [.9, 1e-3]
-    upperbounds = [1.1, 10]
+    θinit = [1., s.ψ.θ[1]] # σf, l
+    lowerbounds = [1e-5, 1e-5]
+    upperbounds = [3., 3.]
+    # θinit = [s.ψ.θ[1]]
+    # lowerbounds = [1e-3]
+    # upperbounds = [3]
     res = optimize(f, lowerbounds, upperbounds, θinit)
 
     return res

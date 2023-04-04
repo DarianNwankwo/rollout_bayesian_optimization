@@ -154,9 +154,14 @@ end
 Generate a batch of N points inbounds relative to the lowerbounds and
 upperbounds
 """
-function generate_batch(N; lbs, ubs)
+function generate_batch(N; lbs, ubs, ϵinterior=1e-2)
     s = SobolSeq(lbs, ubs)
     B = reduce(hcat, next!(s) for i = 1:N)
+    # Concatenate a few points to B near the bounds in each respective dimension.
+    lbs_interior = lbs .+ ϵinterior
+    ubs_interior = ubs .- ϵinterior
+    B = hcat(B, lbs_interior)
+    B = hcat(B, ubs_interior)
     return B
 end
 
@@ -181,8 +186,13 @@ function centered_fd(f, u, du, h)
     (f(u+h*du)-f(u-h*du))/(2h)
 end
 
+function update_λ(λ, ∇g)
+    k = ceil(log10(norm(∇g)))
+    return λ * 10. ^ (-k)
+end
 
 function update_x(x; λ, ∇g, lbs, ubs)
+    # λ = update_λ(λ, ∇g)
     x = x .+ λ*∇g
     x = max.(x, lbs)
     x = min.(x, ubs)
@@ -212,28 +222,73 @@ end
 
 function stochastic_gradient_ascent_adam(x0;
     λ=0.01, β1=0.9, β2=0.999, ϵ=1e-8, ftol=1e-6, gtol=1e-6,
-    sur, max_sgd_iters, lbs, ubs, mc_iters, lds_rns, horizon)
+    sur, max_sgd_iters, lbs, ubs, mc_iters, lds_rns, horizon, max_counter)
     m = zeros(size(x0))
     v = zeros(size(x0))
     xstart = x0
 
     objs, grads, obj_old = [], [], -Inf
     iters = 1
+    counter = 0
 
     for epoch in 1:max_sgd_iters
+        iters = epoch
+        # Compute stochastic estimates of function and gradient
+        μx, ∇μx = simulate_trajectory(sur;
+            mc_iters=mc_iters, rnstream=lds_rns, lbs=lbs, ubs=ubs, x0=x0, h=horizon
+        )
+
+        # Update position and moment estimates
+        x0, m, v = update_x_adam(x0; ∇g=∇μx, λ=λ, β1=β1, β2=β2, ϵ=ϵ, m=m, v=v, lbs=lbs, ubs=ubs)
+
+        # Store computed objective
+        push!(objs, μx)
+        push!(grads, ∇μx)
+
+        # Check for convergence: gradient is approx 0,
+        if abs(objs[end] - obj_old) < ftol
+            # println("Objective is small")
+            break
+        end
+
+        if norm(grads[end]) < gtol
+            # println("Gradient is small")
+            break
+        end
+        
+        counter += objs[end] - obj_old < 0
+        if counter >= max_counter
+            # println("Counter is large")
+            break
+        end 
+
+        obj_old = objs[end]
+    end
+
+    return (start=xstart, finish=x0, final_obj=objs[end], final_grad=grads[end], iters=iters)
+end
+
+function stochastic_gradient_ascent_vanilla(x0;
+    λ=0.01, ftol=1e-6, gtol=1e-6, sur, max_sgd_iters, lbs, ubs, mc_iters, lds_rns, horizon)
+    xstart = x0
+
+    objs, grads, obj_old = [], [], -Inf
+    iters = 1
+
+    for epoch in 1:max_sgd_iters
+        iters = epoch
         # Compute stochastic estimates of function and gradient
         μx, ∇μx = simulate_trajectory(sur;
             mc_iters=mc_iters, rnstream=lds_rns, lbs=lbs, ubs=ubs, x0=x0, h=horizon
         )
         # Update position and moment estimates
-        x0, m, v = update_x_adam(x0; ∇g=∇μx, λ=λ, β1=β1, β2=β2, ϵ=ϵ, m=m, v=v, lbs=lbs, ubs=ubs)
+        x0 = update_x(x0; λ=λ, ∇g=∇μx, lbs=lbs, ubs=ubs)
         # Store computed objective
         push!(objs, μx)
         push!(grads, ∇μx)
 
         # Check for convergence
         if abs(objs[end] - obj_old) < ftol || norm(grads[end]) < gtol
-            iters = epoch
             break
         end
 
@@ -255,4 +310,29 @@ function poi(μ, σ, fbest)
     z = (fbest - μ) / σ
     Φz = Distributions.normcdf(z)
     return Φz
+end
+
+function measure_gap(sur::RBFsurrogate, fbest)
+    gaps = []
+    init_mini = sur.y[1] .+ sur.ymean
+    maximum_possible_reduction = init_mini - fbest
+    
+    for i in 1:length(sur.y)
+        cur_mini = minimum(sur.y[1:i]) .+ sur.ymean
+        gap = (init_mini - cur_mini) / maximum_possible_reduction
+        push!(gaps, gap)
+    end
+    
+    return gaps
+end
+
+function create_filename(dict::Dict{String, Any})
+    function_name = dict["function-name"]
+    function_args = dict["function-args"]
+    h = dict["horizon"]
+    mc_iters = dict["mc-samples"]
+    sgd_iters = dict["sgd-iters"]
+    b = dict["batch-size"]
+    filename = string(function_name, "_", function_args, "_bayesopt_horizon", h, "_mc", mc_iters, "_sgd", sgd_iters, "_batchsize", b, ".csv")
+    return filename
 end
