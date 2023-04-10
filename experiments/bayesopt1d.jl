@@ -42,6 +42,10 @@ function parse_command_line(args)
             action = :store_arg
             help = "Function args"
             default = nothing
+        "--objective"
+            action = :store_arg
+            help = "Objective (default: ei)"
+            default = "ei"
     end
 
     parsed_args = parse_args(args, parser)
@@ -62,7 +66,7 @@ using CSV
 using Tables
 using DataFrames
 
-# addprocs()
+# addprocs(4)
 # println("Total Workers: $(nworkers())")
 
 # @everywhere include("../rollout.jl")
@@ -98,6 +102,7 @@ HORIZON = cli_args["horizon"]
 MC_SAMPLES = cli_args["mc-samples"]
 BUDGET = cli_args["budget"]
 NUM_TRIALS = cli_args["num-trials"]
+OBJECTIVE = cli_args["objective"] == "ei" ? :EI : :LOGEI
 
 # Setup toy problem
 testfn = testfns[func_name](func_args...)
@@ -119,13 +124,12 @@ batch = generate_batch(BATCH_SIZE; lbs=lbs, ubs=ubs)
 gaps = zeros(NUM_TRIALS, BUDGET+2) # +2 for initial gap and row index
 gaps[:, 1] = cumsum(ones(NUM_TRIALS))
 
-
 for trial in 1:NUM_TRIALS
     # Setup structures for collection trial data
     X = reshape(initial_samples[:, trial], testfn.dim, 1)
     sur = fit_surrogate(ψ, X, testfn.f; σn2=σn2) # (TODO): Learn kernel hyperparameters
 
-    println("Beginning Bayesian Optimization Main Loop")
+    println("$trial.) Beginning Bayesian Optimization Main Loop")
     println("-----------------------------------------")
     for budget in 1:BUDGET
         println("Iteration #$budget")
@@ -133,33 +137,38 @@ for trial in 1:NUM_TRIALS
         results = []
 
         # results = @distributed (append!) for j = 1:size(batch, 2)
-        #     try
-        #         x0 = batch[:, j]
-        #         res = stochastic_gradient_ascent_adam(x0;
-        #             max_sgd_iters=MAX_SGD_ITERS, lbs=lbs, ubs=ubs, mc_iters=MC_SAMPLES,
-        #             lds_rns=lds_rns, horizon=HORIZON, sur=sur, gtol=1e-10, ftol=1e-8, max_counter=10
-        #         )
-        #         res
-        #     catch e
-        #         continue
-        #     end
+        #     x0 = batch[:, j]
+
+        #     res = stochastic_gradient_ascent_adam(x0;
+        #         max_sgd_iters=MAX_SGD_ITERS, lbs=lbs, ubs=ubs, mc_iters=MC_SAMPLES, objective=OBJECTIVE,
+        #         lds_rns=lds_rns, horizon=HORIZON, sur=sur, gtol=1e-10, ftol=1e-8, max_counter=10
+        #     )
+
+        #     [res]
         # end # END @distributed
+
+        # @sync @distributed for j = 1:size(batch, 2)
+        #     x0 = batch[:, j]
+
+        #     res = stochastic_gradient_ascent_adam(x0;
+        #         max_sgd_iters=MAX_SGD_ITERS, lbs=lbs, ubs=ubs, mc_iters=MC_SAMPLES,
+        #         lds_rns=lds_rns, horizon=HORIZON, sur=sur, gtol=1e-10, ftol=1e-8, max_counter=10
+        #     )
+        # end # END @distributed
+
         for j = 1:size(batch, 2)
             x0 = batch[:, j]
-            try
-                res = stochastic_gradient_ascent_adam(x0;
-                    max_sgd_iters=MAX_SGD_ITERS, lbs=lbs, ubs=ubs, mc_iters=MC_SAMPLES,
-                    lds_rns=lds_rns, horizon=HORIZON, sur=sur, gtol=1e-10, ftol=1e-8, max_counter=10
-                )
-                push!(results, res)
-            catch e
-                continue
-            end
+
+            res = stochastic_gradient_ascent_adam(x0;
+                max_sgd_iters=MAX_SGD_ITERS, lbs=lbs, ubs=ubs, mc_iters=MC_SAMPLES,
+                lds_rns=lds_rns, horizon=HORIZON, sur=sur, gtol=1e-10, ftol=1e-8, max_counter=10
+            )
+            push!(results, res)
         end
         
         if length(results) == 0
             start = finish = rand(testfn.dim) .* (ubs - lbs) + lbs
-            push!(results, (start=start, finish=finish, final_obj=nothing, final_grad=nothing, iters=0))
+            push!(results, (start=start, finish=finish, final_obj=nothing, final_grad=nothing, iters=0, success=true))
         end
 
         # Update surrogate with element that optimize the acquisition function
@@ -179,6 +188,7 @@ for trial in 1:NUM_TRIALS
     
     # Update collective data
     gaps[trial, 2:end] = measure_gap(sur, fbest)
+    println("\nObservations: $(sur.y) -- True Best: $fbest")
 end
 
 

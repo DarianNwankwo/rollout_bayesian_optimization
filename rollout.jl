@@ -45,14 +45,10 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn
     end
     sx0 = T.s(x0)
     T.opt_HEI = sx0.HEI
-    # δsx0 = zeros(length(x0))
-    # try
-    #     δsx0 = -sx0.HEI \ T.δs(sx0).∇EI
-    # catch e
-    #     println("HEI: $(sx0.HEI) -- EI: $(sx0.EI) -- x0: $(x0)")
-    #     exit(1)
-    # end
-    δsx0 = -sx0.HEI \ T.δs(sx0).∇EI
+    δsx0 = zeros(length(x0))
+    if sx0.EI > 0
+        δsx0 = -sx0.HEI \ T.δs(sx0).∇EI
+    end
 
     # Update surrogate, perturbed surrogate, and multioutput surrogate
     T.s = update_surrogate(T.s, x0, f0)
@@ -162,7 +158,7 @@ function visualize1D(T::Trajectory)
 end
 
 
-function simulate_trajectory(sur::RBFsurrogate; x0, mc_iters, rnstream, lbs, ubs, h)
+function simulate_trajectory(sur::RBFsurrogate; objective=:EI, x0, mc_iters, rnstream, lbs, ubs, h)
     sx = sur(x0)
     αxi, ∇αxi = 0., zeros(size(sur.X, 1))
 
@@ -172,7 +168,7 @@ function simulate_trajectory(sur::RBFsurrogate; x0, mc_iters, rnstream, lbs, ubs
 
         # Rollout trajectory
         T = Trajectory(fsur, x0, fantasy_ndx; h=h, fopt=minimum(sur.y) + sur.ymean)
-        rollout!(T, lbs, ubs; rnstream=rnstream[sample,:,:])
+        rollout!(T, lbs, ubs; rnstream=rnstream[sample,:,:], objective=objective)
 
         # Evaluate rolled out trajectory
         αxi += α(T)

@@ -22,8 +22,8 @@ function tplot(f :: TestFunction)
         xx = range(f.bounds[1,1], f.bounds[1,2], length=100)
         yy = range(f.bounds[2,1], f.bounds[2,2], length=100)
         plot(xx, yy, (x,y) -> f([x,y]), st=:contour)
-        # scatter!([xy[1] for xy in f.xopt], [xy[2] for xy in f.xopt])
-        scatter!([f.xopt[1]], [f.xopt[2]], label="xopt")
+        scatter!([xy[1] for xy in f.xopt], [xy[2] for xy in f.xopt], label="xopt")
+        # scatter!([f.xopt[1]], [f.xopt[2]], label="xopt")
     else
         error("Can only plot 1- or 2-dimensional TestFunctions")
     end
@@ -50,7 +50,8 @@ end
 function TestRosenbrock()
     f(xy) = (1-xy[1])^2 + 100*(xy[2]-xy[1]^2)^2
     ∇f(xy) = [-2*(1-xy[1]) - 400*xy[1]*(xy[2]-xy[1]^2), 200*(xy[2]-xy[1]^2)]
-    return TestFunction(2, [-5.0 10.0 ; -5.0 10.0 ], ([1.0, 1.0],), f, ∇f)
+    # return TestFunction(2, [-5.0 10.0 ; -5.0 10.0 ], ([1.0, 1.0],), f, ∇f)
+    return TestFunction(2, [-2.0 2.0 ; -1.0 3.0 ], ([1.0, 1.0],), f, ∇f)
 end
 
 
