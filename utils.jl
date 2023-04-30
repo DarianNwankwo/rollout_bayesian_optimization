@@ -221,7 +221,7 @@ function update_x_adam(x0; ∇g,  λ, β1, β2, ϵ, m, v, lbs, ubs)
 end
 
 function stochastic_gradient_ascent_adam(x0;
-    λ=0.01, β1=0.9, β2=0.999, ϵ=1e-8, ftol=1e-6, gtol=1e-6, objective=:EI,
+    λ=0.01, β1=0.9, β2=0.999, ϵ=1e-8, ftol=1e-6, gtol=1e-6, objective=:EI, varred=true,
     sur, max_sgd_iters, lbs, ubs, mc_iters, lds_rns, horizon, max_counter)
     m = zeros(size(x0))
     v = zeros(size(x0))
@@ -248,6 +248,9 @@ function stochastic_gradient_ascent_adam(x0;
         x0, m, v = update_x_adam(x0; ∇g=∇μx, λ=λ, β1=β1, β2=β2, ϵ=ϵ, m=m, v=v, lbs=lbs, ubs=ubs)
 
         # Store computed objective
+        if varred
+            μx += sur(x0).EI
+        end
         push!(objs, μx)
         push!(grads, ∇μx)
 

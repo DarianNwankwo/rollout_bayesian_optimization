@@ -55,7 +55,7 @@ end
 cli_args = parse_command_line(ARGS)
 
 using Measures
-# using Distributed
+using Distributed
 using Distributions
 using LinearAlgebra
 using Plots
@@ -66,15 +66,15 @@ using CSV
 using Tables
 using DataFrames
 
-# addprocs(4)
-# println("Total Workers: $(nworkers())")
+addprocs(4)
+println("Total Workers: $(nworkers())")
 
-# @everywhere include("../rollout.jl")
-# @everywhere include("../testfns.jl")
-# @everywhere include("./utils.jl")
-include("../rollout.jl")
-include("../testfns.jl")
-include("./utils.jl")
+@everywhere include("../rollout.jl")
+@everywhere include("../testfns.jl")
+@everywhere include("./utils.jl")
+# include("../rollout.jl")
+# include("../testfns.jl")
+# include("./utils.jl")
 
 Random.seed!(1906 + 1867 + 1865)
 
@@ -136,16 +136,16 @@ for trial in 1:NUM_TRIALS
         # Optimize each batch location in parallel
         results = []
 
-        # results = @distributed (append!) for j = 1:size(batch, 2)
-        #     x0 = batch[:, j]
+        results = @distributed (append!) for j = 1:size(batch, 2)
+            x0 = batch[:, j]
 
-        #     res = stochastic_gradient_ascent_adam(x0;
-        #         max_sgd_iters=MAX_SGD_ITERS, lbs=lbs, ubs=ubs, mc_iters=MC_SAMPLES, objective=OBJECTIVE,
-        #         lds_rns=lds_rns, horizon=HORIZON, sur=sur, gtol=1e-10, ftol=1e-8, max_counter=10
-        #     )
+            res = stochastic_gradient_ascent_adam(x0;
+                max_sgd_iters=MAX_SGD_ITERS, lbs=lbs, ubs=ubs, mc_iters=MC_SAMPLES, objective=OBJECTIVE,
+                lds_rns=lds_rns, horizon=HORIZON, sur=sur, gtol=1e-10, ftol=1e-8, max_counter=10
+            )
 
-        #     [res]
-        # end # END @distributed
+            [res]
+        end # END @distributed
 
         # @sync @distributed for j = 1:size(batch, 2)
         #     x0 = batch[:, j]
@@ -156,15 +156,15 @@ for trial in 1:NUM_TRIALS
         #     )
         # end # END @distributed
 
-        for j = 1:size(batch, 2)
-            x0 = batch[:, j]
+        # for j = 1:size(batch, 2)
+        #     x0 = batch[:, j]
 
-            res = stochastic_gradient_ascent_adam(x0;
-                max_sgd_iters=MAX_SGD_ITERS, lbs=lbs, ubs=ubs, mc_iters=MC_SAMPLES,
-                lds_rns=lds_rns, horizon=HORIZON, sur=sur, gtol=1e-10, ftol=1e-8, max_counter=10
-            )
-            push!(results, res)
-        end
+        #     res = stochastic_gradient_ascent_adam(x0;
+        #         max_sgd_iters=MAX_SGD_ITERS, lbs=lbs, ubs=ubs, mc_iters=MC_SAMPLES,
+        #         lds_rns=lds_rns, horizon=HORIZON, sur=sur, gtol=1e-10, ftol=1e-8, max_counter=10
+        #     )
+        #     push!(results, res)
+        # end
         
         if length(results) == 0
             start = finish = rand(testfn.dim) .* (ubs - lbs) + lbs
