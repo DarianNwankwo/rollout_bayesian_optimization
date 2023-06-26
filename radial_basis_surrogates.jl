@@ -1,76 +1,87 @@
-using Distributions
-using LinearAlgebra
-
 include("lazy_struct.jl")
 include("radial_basis_functions.jl")
+"""
+Here we distinguish between four possible surrogates that can be used in the
+optimization process:
+    1. RBFsurrogate: a standard RBF surrogate
+    2. FantasyRBFsurrogate: a fantasized RBF surrogate
+    3. δFRBFsurrogate: a perturbed fantasized RBF surrogate
+    4. MultiOutputFantasyRBFsurrogate: a multi-output RBF surrogate
+"""
 
 # ------------------------------------------------------------------
-# Operations on GP/RBF surrogates
+# 1. Operations on GP/RBF surrogates
 # ------------------------------------------------------------------
 struct RBFsurrogate
     ψ::RBFfun
     X::Matrix{Float64}
     K::Matrix{Float64}
-    fK::Cholesky
+    L::LowerTriangular{Float64, Matrix{Float64}}
     y::Vector{Float64}
     c::Vector{Float64}
     σn2::Float64
-end
-
-function fit_surrogate(ψ::RBFfun, X::Matrix{Float64}, f::Function; σn2=1e-6)
-    d, N = size(X)
-    K = eval_KXX(ψ, X; σn2=σn2)
-    fK = cholesky(Hermitian(K))
-    y = [f(X[:,j]) for j = 1:N]
-    c = fK\y
-    return RBFsurrogate(ψ, X, K, fK, y, c, σn2)
+    ymean::Float64
 end
 
 function fit_surrogate(ψ::RBFfun, X::Matrix{Float64}, y::Vector{Float64}; σn2=1e-6)
     d, N = size(X)
     K = eval_KXX(ψ, X, σn2=σn2)
-    fK = cholesky(Hermitian(K))
-    c = fK\y
-    return RBFsurrogate(ψ, X, K, fK, y, c, σn2)
+    L = cholesky(Hermitian(K)).L
+    ymean = mean(y)
+    y .-= ymean
+    c = L'\(L\y)
+    return RBFsurrogate(ψ, X, K, L, y, c, σn2, ymean)
 end
 
-function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, f::Function)
-    X = hcat(s.X, x)
-    y = vcat(s.y, f(x))
-    KxX = eval_KxX(s.ψ, x, s.X)
+function update_surrogate(s::RBFsurrogate, xnew::Vector{Float64}, ynew::Float64)
+    X = hcat(s.X, xnew)
+    y = vcat(s.y .+ s.ymean, ynew) # Recovery y and add new observation
+    ymean = mean(y) # Compute new mean of observations
+    y .-= ymean # Offset observations to be zero mean
+
+    # Update covariance matrix and it's cholesky factorization
+    KxX = eval_KxX(s.ψ, xnew, s.X)
     K = [s.K  KxX
-         KxX' eval_KXX(s.ψ, reshape(x, length(x), 1), σn2=s.σn2)]
-    fK = cholesky(Hermitian(K))
-    c = fK\y
-    return RBFsurrogate(s.ψ, X, K, fK, y, c, s.σn2)
+         KxX' eval_KXX(s.ψ, reshape(xnew, length(xnew), 1), σn2=s.σn2)]
+    
+    function update_cholesky(K::Matrix{Float64}, L::LowerTriangular{Float64, Matrix{Float64}})
+        # Grab entries from update covariance matrix
+        n = size(K, 1)
+        B = @view K[n:n, 1:n-1]
+        C = K[n, n]
+        
+        # Compute the updated factorizations using schur complements
+        L21 = B / L'
+        L22 = sqrt(C - first(L21*L21'))
+    
+        # Update the full factorization
+        ufK = zeros(n, n)
+        ufK[1:n-1, 1:n-1] .= L
+        ufK[n:n, 1:n-1] .= L21
+        ufK[n, n] = L22
+    
+        return LowerTriangular(ufK)
+    end
+
+    L = update_cholesky(K, s.L)
+    c = L'\(L\y)
+    return RBFsurrogate(s.ψ, X, K, L, y, c, s.σn2, ymean)
 end
 
-function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, ys::Vector{Float64})
-    X = hcat(s.X, x)
-    y = ys
-    KxX = eval_KxX(s.ψ, x, s.X)
-    K = [s.K  KxX
-         KxX' eval_KXX(s.ψ, reshape(x, length(x), 1), σn2=s.σn2)]
-    fK = cholesky(Hermitian(K))
-    c = fK\y
-    return RBFsurrogate(s.ψ, X, K, fK, y, c, s.σn2)
+function plot1D(s::RBFsurrogate; xmin=-1, xmax=1, npts=100)
+    x = range(xmin, stop=xmax, length=npts)
+    μ, σ = zeros(npts), zeros(npts)
+
+    for i = 1:npts
+        sx = s([x[i]])
+        μ[i] = sx.μ
+        σ[i] = sx.σ
+    end
+
+    plot(x, μ, ribbons=2σ, label="μ±2σ")
+    scatter!(s.X[1,:], get_observations(s), label="Observations")
 end
 
-function update_surrogate(s::RBFsurrogate, x::Vector{Float64}, ys::Float64)
-    X = hcat(s.X, x)
-    y = vcat(s.y, ys)
-    KxX = eval_KxX(s.ψ, x, s.X)
-    K = [s.K  KxX
-         KxX' eval_KXX(s.ψ, reshape(x, length(x), 1), σn2=s.σn2)]
-    fK = cholesky(Hermitian(K))
-    c = fK\y
-    return RBFsurrogate(s.ψ, X, K, fK, y, c, s.σn2)
-end
-
-"""
-@TODO: Investigate using automatic differentiation to compute the gradient of the
-analytic terms.
-"""
 function eval(s::RBFsurrogate, x::Vector{Float64}, ymin::Real)
     sx = LazyStruct()
     set(sx, :s, s)
@@ -82,7 +93,7 @@ function eval(s::RBFsurrogate, x::Vector{Float64}, ymin::Real)
     sx.kx = () -> eval_KxX(s.ψ, x, s.X)
     sx.∇kx = () -> eval_∇KxX(s.ψ, x, s.X)
 
-    sx.μ = () -> dot(sx.kx, s.c)
+    sx.μ = () -> dot(sx.kx, s.c) + s.ymean
     sx.∇μ = () -> sx.∇kx * s.c
     sx.Hμ = function()
         H = zeros(d, d)
@@ -92,8 +103,8 @@ function eval(s::RBFsurrogate, x::Vector{Float64}, ymin::Real)
         return H
     end
 
-    sx.w = () -> s.fK\sx.kx
-    sx.Dw = () -> s.fK\(sx.∇kx')
+    sx.w = () -> s.L'\(s.L\sx.kx)
+    sx.Dw = () -> s.L'(s.L\(sx.∇kx'))
     sx.∇w = () -> sx.Dw'
     sx.σ = () -> sqrt(s.ψ(0) - dot(sx.kx', sx.w))
     sx.∇σ = () -> -(sx.∇kx * sx.w) / sx.σ
@@ -191,7 +202,7 @@ function eval(s::RBFsurrogate, x::Vector{Float64}, ymin::Real)
     return sx
 end
 
-eval(s::RBFsurrogate, x::Vector{Float64}) = eval(s, x, minimum(s.y))
+eval(s::RBFsurrogate, x::Vector{Float64}) = eval(s, x, minimum(s.y) + s.ymean)
 (s::RBFsurrogate)(x::Vector{Float64}) = eval(s, x)
 
 function gp_draw(s::RBFsurrogate, xloc; stdnormal)
@@ -199,54 +210,270 @@ function gp_draw(s::RBFsurrogate, xloc; stdnormal)
     return sx.μ + sx.σ*stdnormal
 end
 
-"""
-The initial sample from our trajectory needs a gradient sample, so this
-should only be used on the initial sample. Subsequent samples should use
-the multi-output surrogate gp_draw function.
-"""
-function dgp_draw(sur::RBFsurrogate, xloc; dim, stdnormal, h=1e-8)
-    f = gp_draw(sur, xloc; stdnormal=stdnormal)
-    E = I(length(xloc))
-    ∇f = zeros(length(xloc))
-
-    for d in 1:length(xloc)
-        xplus = xloc + E[:, d] * h
-        xminus = xloc - E[:, d] * h
-        fplus = gp_draw(sur, xplus; stdnormal=stdnormal)
-        fminus = gp_draw(sur, xminus; stdnormal=stdnormal)
-        ∇f[d] = (fplus - fminus) / (2h)
-    end
-
-    return f, ∇f
+# ------------------------------------------------------------------
+# 2. Operations on Fantasized GP/RBF surrogates
+# ------------------------------------------------------------------
+mutable struct FantasyRBFsurrogate
+    ψ::RBFfun
+    X::Matrix{Float64}
+    K::Matrix{Float64}
+    L::LowerTriangular{Float64, Matrix{Float64}}
+    y::Vector{Float64}
+    c::Vector{Float64}
+    σn2::Float64
+    ymean::Float64
+    h::Int64
+    known_observed::Int64
+    fantasies_observed::Int64
 end
 
+"""
+Fitting the fantasy surrogate consist of using the previous surrogate's covariance
+factorization and preallocating space for the remaining factorization when fantasy
+samples are observed.
+"""
+function fit_fsurrogate(s::RBFsurrogate, h::Int64)
+    d, N = size(s.X)
+    K = zeros(N+h+1, N+h+1)
+    K[1:N, 1:N] = @view s.K[:,:]
+    L = LowerTriangular(zeros(N+h+1, N+h+1))
+    L[1:N, 1:N] = @view s.L[:,:]
+    X = zeros(d, N+h+1)
+    slice = 1:N
+    X[:, slice] = @view s.X[:,:] 
+    return FantasyRBFsurrogate(ψ, X, K, L, s.y, s.c, s.σn2, s.ymean, h, N, 0)
+end
+
+function reset_fsurrogate!(fs::FantasyRBFsurrogate, s::RBFsurrogate)
+    d, N = size(s.X)
+    fs.X[:, 1:N] = @view s.X[:, 1:N]
+    fs.K[1:N, 1:N] = @view s.K[:,:]
+    fs.L[1:N, 1:N] = @view s.L[:,:]
+    fs.ymean = s.ymean
+    fs.y = s.y
+    fs.fantasies_observed = 0
+    return
+end
+
+function update_fsurrogate!(fs::FantasyRBFsurrogate, xnew::Vector{Float64}, ynew::Float64)
+    @assert fs.fantasies_observed < fs.h + 1 "All fantasies have been observed!"
+    update_ndx = fs.known_observed + fs.fantasies_observed + 1
+    # We can use the same logic here for preallocating space for X
+    fs.X[:, update_ndx] = xnew
+    fs.y = vcat(fs.y .+ fs.ymean, ynew) # Recovery y and add new observation
+    fs.ymean = mean(fs.y) # Compute new mean of observations
+    fs.y .-= fs.ymean # Offset observations to be zero mean
+
+    # Update covariance matrix and it's cholesky factorization
+    KxX = eval_KxX(fs.ψ, xnew, fs.X[:, 1:update_ndx-1])
+    fs.K[update_ndx, 1:update_ndx-1] = KxX
+    fs.K[1:update_ndx-1, update_ndx] = KxX'
+    fs.K[update_ndx, update_ndx] = first(eval_KXX(fs.ψ, reshape(xnew, length(xnew), 1), σn2=fs.σn2))
+    
+    function update_cholesky(K::Matrix{Float64}, L::Matrix{Float64})
+        # Grab entries from update covariance matrix
+        n = size(K, 1)
+        B = @view K[n:n, 1:n-1]
+        C = K[n, n]
+        
+        # Compute the updated factorizations using schur complements
+        L21 = B / L'
+        L22 = sqrt(C - first(L21*L21'))
+    
+        return L21, L22
+    end
+
+    L21, L22 = update_cholesky(
+        fs.K[1:update_ndx, 1:update_ndx],
+        fs.L[1:update_ndx-1, 1:update_ndx-1]
+    )
+    fs.L[update_ndx, 1:update_ndx-1] = L21
+    fs.L[update_ndx, update_ndx] = L22
+    
+    L = @view fs.L[1:update_ndx, 1:update_ndx] 
+    fs.c = L'\(L\fs.y)
+    fs.fantasies_observed += 1    
+
+    return
+end
+
+function eval(fs::FantasyRBFsurrogate, x::Vector{Float64}, ymin::Real)
+    sx = LazyStruct()
+    set(sx, :fs, fs)
+    set(sx, :x, x)
+    set(sx, :ymin, ymin)
+
+    d, N = size(fs.X)
+    slice = 1:fs.known_observed + fs.fantasies_observed
+
+    sx.kx = () -> eval_KxX(fs.ψ, x, fs.X)
+    sx.∇kx = () -> eval_∇KxX(fs.ψ, x, fs.X)
+
+    sx.μ = () -> dot(sx.kx, fs.c) + fs.ymean
+    sx.∇μ = () -> sx.∇kx * fs.c
+    sx.Hμ = function()
+        H = zeros(d, d)
+        for j = 1:N
+            H += fs.c[j] * eval_Hk(fs.ψ, x-fs.X[:,j])
+        end
+        return H
+    end
+
+    sx.w = () -> fs.L[slice, slice]'\(fs.L[slice, slice]\sx.kx)
+    sx.Dw = () -> fs.L[slice, slice]'(fs.L[slice, slice]\(sx.∇kx'))
+    sx.∇w = () -> sx.Dw'
+    sx.σ = () -> sqrt(fs.ψ(0) - dot(sx.kx', sx.w))
+    sx.∇σ = () -> -(sx.∇kx * sx.w) / sx.σ
+    sx.Hσ = function()
+        H = -sx.∇σ * sx.∇σ' - sx.∇kx * sx.Dw
+        w = sx.w
+        for j = 1:N
+            H -= w[j] * eval_Hk(fs.ψ, x-fs.X[:,j])
+        end
+        H /= sx.σ
+        return H
+    end
+
+    sx.z = () -> (ymin - sx.μ) / sx.σ
+    sx.∇z = () -> (-sx.∇μ - sx.z*sx.∇σ) / sx.σ
+    sx.Hz = () -> Hermitian((-sx.Hμ + (sx.∇μ*sx.∇σ' + sx.∇σ*sx.∇μ')/sx.σ -
+        sx.z*(sx.Hσ - 2/sx.σ*sx.∇σ*sx.∇σ')) / sx.σ)
+
+    sx.Φz = () -> Distributions.normcdf(sx.z)
+    sx.ϕz = () -> Distributions.normpdf(sx.z)
+    sx.g = () -> sx.z * sx.Φz + sx.ϕz
+
+    sx.EI = () -> sx.σ*sx.g
+    sx.∇EI = () -> sx.g*sx.∇σ + sx.σ*sx.Φz*sx.∇z
+    sx.HEI = () -> Hermitian(sx.Hσ*sx.g +
+        sx.Φz*(sx.∇σ*sx.∇z' + sx.∇z*sx.∇σ' + sx.σ*sx.Hz) +
+        sx.σ*sx.ϕz*sx.∇z*sx.∇z')
+
+    # Optimizing expected improvement is tricky in regions where EI is
+    # exponentially small -- we have to have a reasonable starting
+    # point to get going.  For negative z values, we rewrite g(z) = G(-z)
+    # in terms of the Mills ratio R(z) = Q(z)/ϕ(z) where Q(z) is the
+    # complementary CDF.  Then G(z) = H(z) ϕ(z) where H(z) = 1-zR(z).
+    # For sufficiently large R, the Mills ratio can be computed by a
+    # generalized continued fraction due to Laplace:
+    #   R(z) = 1/z+ 1/z+ 2/z+ 3/z+ ...
+    # We rewrite this as
+    #   R(z) = W(z)/(z W(z)+1) where W(z) = z + 2/z+ 3/z+ ...
+    # Using this definition, we have
+    #   H(z) = 1/(1+z W(z))
+    #   log G(z) = -log(w+zW(z)) + normlogpdf(z)
+    #   [log G(z)]' = -Q(z)/G(z) = -W(z)
+    #   [log G(z)]'' = 1 + zW(z) - W(z)^2
+    # The continued fraction doesn't converge super-fast, but that is
+    # almost surely fine for what we're doing here.  If needed, we could
+    # do a similar manipulation to get an optimized rational approximation
+    # to W from Cody's 1969 rational approximations to erfc.  Or we could
+    # use a less accurate approximation -- the point of getting the tails
+    # right is really to give us enough inormation to climb out of the flat
+    # regions for EI.
+
+    sx.WQint = function()
+        z = -sx.z
+        u = z
+        for k = 500:-1:2
+            u = k/(z+u)
+        end
+        z + u
+    end
+
+    sx.logEI = function()
+        z = sx.z
+        if z < -1.0
+            W = sx.WQint
+            log(sx.σ) - log(1-z*W) + Distributions.normlogpdf(z)
+        else
+            log(sx.σ) + log(sx.g)
+        end
+    end
+
+    sx.∇logEI = function()
+        z = sx.z
+        if z < -1.0
+            sx.∇σ/sx.σ + sx.WQint*sx.∇z
+        else
+            sx.∇σ/sx.σ + sx.Φz/sx.g*sx.∇z
+        end
+    end
+
+    sx.HlogEI = function()
+        z = sx.z
+        if z < -1.0
+            W = sx.WQint
+            HlogG = 1.0-(z+W)*W
+            Hermitian( (sx.Hσ - sx.∇σ*sx.∇σ'/sx.σ)/sx.σ +
+                HlogG*sx.∇z*sx.∇z' + W*sx.Hz)
+        else
+            W = sx.Φz/sx.g
+            HlogG = (sx.ϕz-sx.Φz*sx.Φz/sx.g)/sx.g
+            Hermitian( (sx.Hσ - sx.∇σ*sx.∇σ'/sx.σ)/sx.σ +
+                HlogG*sx.∇z*sx.∇z' + W*sx.Hz)
+        end
+    end
+    
+    return sx
+end
+
+eval(fs::FantasyRBFsurrogate, x::Vector{Float64}) = eval(fs, x, minimum(fs.y) + fs.ymean)
+(fs::FantasyRBFsurrogate)(x::Vector{Float64}) = eval(fs, x)
+
 # ------------------------------------------------------------------
-# Operations on GP/RBF surrogate derivatives wrt node positions
+# 3. Operations on GP/RBF surrogate derivatives wrt node positions
 # ------------------------------------------------------------------
-struct δRBFsurrogate
-    s::RBFsurrogate
+mutable struct δRBFsurrogate
+    fs::FantasyRBFsurrogate
     X::Matrix{Float64}
     K::Matrix{Float64}
     y::Vector{Float64}
     c::Vector{Float64}
+    ymean::Float64
 end
 
-function fit_δsurrogate(s::RBFsurrogate, δX::Matrix{Float64}, ∇f::Function)
-    d, N = size(s.X)
-    δK = eval_δKXX(s.ψ, s.X, δX)
-    δy = [dot(∇f(s.X[:,j]), δX[:,j]) for j=1:N]
-    δc = s.fK \ (δy - δK*s.c)
-    return δRBFsurrogate(s, δX, δK, δy, δc)
+function fit_δsurrogate(fs::FantasyRBFsurrogate, δX::Matrix{Float64}, ∇ys::Vector{Vector{Float64}})
+    slice = 1:fs.known_observed # fs.known_observed == N
+    d, N = size(fs.X[:, slice])
+    δK = zeros(N+fs.h+1, N+fs.h+1)
+    δK[1:N, 1:N] = eval_δKXX(fs.ψ, fs.X[:, slice], δX)
+    δy = [dot(∇ys[j], δX[:,j]) for j=1:N]
+    δymean = mean(δy)
+    δy .-= δymean
+    δc = fs.L[slice, slice]' \ (fs.L[slice, slice] \ (δy - δK[slice, slice]*fs.c))
+    δXpreallocate = zeros(d, N+fs.h+1)
+    δXpreallocate[:, slice] = δX
+    return δRBFsurrogate(fs, δXpreallocate, δK, δy, δc, δymean)
 end
 
-function update_δsurrogate(us::RBFsurrogate, δs::δRBFsurrogate, 
-    δx::Vector{Float64}, ∇y::Vector{Float64})
-    d, N = size(us.X)
-    δX = hcat(δs.X, δx)
-    δK = eval_δKXX(us.ψ, us.X, δX)
-    δy = vcat(δs.y, dot(∇y, δx))
-    δc = us.fK\(δy - δK*us.c)
-    return δRBFsurrogate(us, δX, δK, δy, δc)
+function reset_δsurrogate!(δs::δRBFsurrogate, fs::RBFsurrogate)
+end
+
+function update_δsurrogate!(δs::δRBFsurrogate, ufs::FantasyRBFsurrogate, δx::Vector{Float64}, ∇y::Vector{Float64})
+    update_ndx = ufs.known_observed + ufs.fantasies_observed
+    d, N = size(ufs.X, 1), ufs.known_observed + ufs.fantasies_observed
+    # Recover the original perturbation vector and add new perturbation
+    δs.y = vcat(δs.y .+ δs.ymean, dot(∇y, δx))
+    # Update the perturbation mean and offset to perturbation vector
+    δs.ymean = mean(δs.y)
+    δs.y .-= δs.ymean
+
+    # Update the perturbation to the covariance matrix
+    δs.X[:, update_ndx] = δx
+    δKxX = eval_δKxX(ufs.ψ, ufs.X[:, update_ndx], ufs.X[:, 1:update_ndx], δs.X[:, 1:update_ndx])
+    δKxX, δKxx = δKxX[1:end-1], δKxX[end]
+
+    # Update the corresponding slice of the preallocated covariance matrix
+    δs.K[update_ndx, 1:update_ndx-1] = δKxX
+    δs.K[1:update_ndx-1, update_ndx] = δKxX'
+    δs.K[update_ndx, update_ndx] = δKxx
+
+    slice = 1:update_ndx
+    δs.K[slice, slice]*ufs.c
+    δs.c = ufs.L[slice, slice]\(δs.y - δs.K[slice, slice]*ufs.c)
+
+    return
 end
 
 function eval(δs :: δRBFsurrogate, sx, δymin)
@@ -254,18 +481,19 @@ function eval(δs :: δRBFsurrogate, sx, δymin)
     set(δsx, :sx, sx)
     set(δsx, :δymin, δymin)
 
-    s = δs.s
+    fs = δs.fs
     x = sx.x
-    d, N = size(s.X)
+    d, N = size(fs.X, 1), fs.known_observed + fs.fantasies_observed
+    slice = 1:N
 
-    δsx.kx  = () -> eval_δKxX(s.ψ, x, s.X, δs.X)
-    δsx.∇kx = () -> eval_δ∇KxX(s.ψ, x, s.X, δs.X)
+    δsx.kx  = () -> eval_δKxX(fs.ψ, x, fs.X[:, slice], δs.X[:, slice])
+    δsx.∇kx = () -> eval_δ∇KxX(fs.ψ, x, fs.X[:, slice], δs.X[:, slice])
 
-    δsx.μ  = () -> δsx.kx'*s.c + sx.kx'*δs.c
-    δsx.∇μ = () -> δsx.∇kx*s.c + sx.∇kx*δs.c
+    δsx.μ  = () -> δsx.kx'*fs.c + sx.kx'*δs.c + δs.ymean
+    δsx.∇μ = () -> δsx.∇kx*fs.c + sx.∇kx*δs.c
 
-    δsx.σ  = () -> (-2*δsx.kx'*sx.w + sx.w'*(δs.K*sx.w)) / (2*sx.σ)
-    δsx.∇σ = () -> (-δsx.∇kx*sx.w - sx.∇w*δsx.kx + sx.∇w*(δs.K*sx.w)-δsx.σ*sx.∇σ)/sx.σ
+    δsx.σ  = () -> (-2*δsx.kx'*sx.w + sx.w'*(δs.K[:, slice]*sx.w)) / (2*sx.σ)
+    δsx.∇σ = () -> (-δsx.∇kx*sx.w - sx.∇w*δsx.kx + sx.∇w*(δs.K[:, slice]*sx.w)-δsx.σ*sx.∇σ)/sx.σ
 
     δsx.z  = () -> (δymin-δsx.μ-sx.z*δsx.σ)/sx.σ
     δsx.∇z = () -> (-δsx.∇μ-sx.∇z*δsx.σ-sx.z*δsx.∇σ)/sx.σ - δsx.z/sx.σ*sx.∇σ
@@ -278,162 +506,200 @@ end
 
 
 function eval(δs :: δRBFsurrogate, sx)
-    ymin, j_ymin = findmin(δs.s.y)
-    δymin = δs.y[j_ymin]
+    ymin, j_ymin = findmin(δs.fs.y)
+    δymin = δs.y[j_ymin] + δs.ymean
     eval(δs, sx, δymin)
 end
 
-
 (δs :: δRBFsurrogate)(sx) = eval(δs, sx)
 
-
-function evalf(δs :: δRBFsurrogate, sx, δymin, fantasy_ndx)
-    # println("Eval with fantasy ndx")
-    δsx = LazyStruct()
-    set(δsx, :sx, sx)
-    set(δsx, :δymin, δymin)
-
-    s = δs.s
-    x = sx.x
-    d, N = size(s.X)
-
-    δsx.kx  = () -> eval_δKxX(s.ψ, x, s.X, δs.X)
-    # δsx.kx = function()
-    #     Xknown = s.X[:, 1:fantasy_ndx-1]
-    #     Xfantasy = s.X[:, fantasy_ndx:end]
-    #     δXfantasy = δs.X[:, fantasy_ndx:end]
-    #     known_kx = eval_KxX(s.ψ, x, Xknown)*0
-    #     fantasy_kx = eval_δKxX(s.ψ, x, Xfantasy, δXfantasy)
-    #     return vcat(known_kx, fantasy_kx)
-    # end
-
-    δsx.∇kx = () -> eval_δ∇KxX(s.ψ, x, s.X, δs.X)
-    # δsx.∇kx = function()
-    #     Xknown = s.X[:, 1:fantasy_ndx-1]
-    #     Xfantasy = s.X[:, fantasy_ndx:end]
-    #     δXfantasy = δs.X[:, fantasy_ndx:end]
-    #     known_∇kx = eval_∇KxX(s.ψ, x, Xknown)
-    #     fantasy_∇kx = eval_δ∇KxX(s.ψ, x, Xfantasy, δXfantasy)
-    #     # println("Known ∇kx: $(known_∇kx) -- Fantasy ∇kx: $(fantasy_∇kx)")
-    #     if fantasy_ndx == size(s.X, 2) + 1
-    #         # println("No fantasy yet: $(known_∇kx)")
-    #         return known_∇kx
-    #     end
-    #     # println("Return: $(hcat(known_∇kx, fantasy_∇kx))")
-    #     return hcat(known_∇kx, fantasy_∇kx)
-    # end
-
-    δsx.μ  = () -> δsx.kx'*s.c + sx.kx'*δs.c
-    δsx.∇μ = () -> δsx.∇kx*s.c + sx.∇kx*δs.c
-
-    δsx.σ  = () -> (-2*δsx.kx'*sx.w + sx.w'*(δs.K*sx.w)) / (2*sx.σ)
-    δsx.∇σ = () -> (-δsx.∇kx*sx.w - sx.∇w*δsx.kx + sx.∇w*(δs.K*sx.w)-δsx.σ*sx.∇σ)/sx.σ
-
-    δsx.z  = () -> (δymin-δsx.μ-sx.z*δsx.σ)/sx.σ
-    δsx.∇z = () -> (-δsx.∇μ-sx.∇z*δsx.σ-sx.z*δsx.∇σ)/sx.σ - δsx.z/sx.σ*sx.∇σ
-
-    δsx.EI  = () -> sx.g*δsx.σ + sx.σ*sx.Φz*δsx.z
-    δsx.∇EI = () -> δsx.∇σ*sx.g + sx.Φz*(δsx.z*sx.∇σ + δsx.σ*sx.∇z + sx.σ*δsx.∇z) + sx.ϕz*δsx.z*sx.∇z
-
-    δsx
-end
-
-
-function evalf(δs :: δRBFsurrogate, sx, fantasy_ndx)
-    ymin, j_ymin = findmin(δs.s.y)
-    δymin = δs.y[j_ymin]
-    evalf(δs, sx, δymin, fantasy_ndx)
-end
-
-
-(δs :: δRBFsurrogate)(sx, fantasy_ndx) = evalf(δs, sx, fantasy_ndx)
-
 # ------------------------------------------------------------------
-# Operations on multi-output GP/RBF surrogate
+# 4. Operations on multi-output GP/RBF surrogate
 # ------------------------------------------------------------------
-"""
-MultiOutputRBFSurrogate makes the assumption that the vector y contains
-function values and derivatives, i.e. y = [f(x1), f(x2), ..., f(xN),
-∇f(x1), ∇f(x2), ..., ∇f(xN)]. Therefore, we must specify the start
-index of the derivatives in the vector y.
-"""
-struct MultiOutputRBFsurrogate
+mutable struct MultiOutputFantasyRBFsurrogate
     ψ::RBFfun
     X::Matrix{Float64}
     K::Matrix{Float64}
-    fK::Cholesky
+    L::LowerTriangular{Float64, Matrix{Float64}}
     y::Vector{Float64}
+    ∇y::Matrix{Float64}
     c::Vector{Float64}
-    ∇xndx::Int64
-    ∇yndx::Int64
+    σn2::Float64
+    ymean::Float64
+    ∇ymean::Vector{Float64}
+    h::Int64
+    known_observed::Int64
+    fantasies_observed::Int64
 end
 
-function fit_multioutput_surrogate(ψ::RBFfun, X::Matrix{Float64},
-    y::Vector{Float64}; ∇xndx::Int64, ∇yndx::Int64, σn2=1e-6)
-    d, N = size(X)
-    K = eval_mixed_KXX(ψ, X; j_∇=∇xndx, σn2=σn2)
-    fK = cholesky(Hermitian(K))
-    c = fK\y
-    return MultiOutputRBFsurrogate(ψ, X, K, fK, y, c, ∇xndx, ∇yndx)
+function fit_multioutput_fsurrogate(s::RBFsurrogate, h::Int64)
+    d, N = size(s.X)
+    max_rows = N + (d+1) * (h + 1)
+    # Preallocate memory for fantasy and known observations design matrix
+    X = zeros(d, N + h + 1)
+    X[:, 1:N] = @view s.X[:,:]
+
+    # Preallocate memory for fantasy and known observations covariance matrix
+    K = zeros(max_rows, max_rows)
+    K[1:N, 1:N] = @view s.K[:,:]
+
+    # Preallocate memory for fantasy and known observations cholesky factorization
+    L = LowerTriangular(zeros(max_rows, max_rows))
+    L[1:N, 1:N] = @view s.L[:,:]
+
+    # Store known history observations separately from fantasized function and gradient values
+    ∇y = Matrix{Float64}(undef, d, 0)
+    ∇ymean = zeros(d)
+
+    # Initial solve of the linear system with only known observations
+    c = L[1:N, 1:N]' \ (L[1:N, 1:N] \ s.y)
+
+    known_observed = N
+    fantasies_observed = 0
+
+    return MultiOutputFantasyRBFsurrogate(
+        s.ψ, X, K, L, copy(s.y), ∇y, c, s.σn2, s.ymean,
+        ∇ymean, h, known_observed, fantasies_observed
+    )
 end
 
-function update_multioutput_surrogate(ms::MultiOutputRBFsurrogate, x::Vector{Float64},
-    y::Float64, ∇y::Vector{Float64}, σn2=1e-6)
-    d, N = size(ms.X)
-    X = hcat(ms.X, x)
+function update_multioutput_fsurrogate!(s::MultiOutputFantasyRBFsurrogate, xnew::Vector{Float64},
+    ynew::Float64, ∇ynew::Vector{Float64})
+    @assert s.fantasies_observed < s.h + 1 "Cannot add more fantasies than the number of fantasies specified in the surrogate"
+    update_ndx = s.known_observed + s.fantasies_observed + 1
+    d, N = size(s.X, 1), s.known_observed + s.fantasies_observed
 
-    # Ksx = eval_mixed_KxX(ms.ψ, ms.X, x; j_∇=ms.∇xndx)
-    # K = [ms.K  Ksx';
-    #      Ksx   eval_mixed_Kxx(ψ, x)]
-    K = eval_mixed_KXX(ψ, X; j_∇=ms.∇xndx, σn2=σn2)
-    fK = cholesky(Hermitian(K))
+    # Add new observation to design matrix
+    s.X[:, update_ndx] = xnew
+    s.fantasies_observed += 1
 
-    yprev, ∇yprev = ms.y[1:ms.∇yndx-1], ms.y[ms.∇yndx:end]
-    yprev = vcat(yprev, y)
-    ∇yprev = vcat(∇yprev, ∇y)
-    y = vcat(yprev, ∇yprev)
+    ############################## Covariance Matrix Update Step ##############################
+    # Add new observation to covariance matrix. We have A, now we add B and C
+    # This includes all previous known, fantasy, and gradient observations.
+    first_row = Vector{Float64}(undef, 0) # the final size of this should be m + (i - 1) * (d + 1)
+    remainder_rows = Matrix{Float64}(undef, d, 0) # the final size of this should be d x (m + (i - 1) * (d + 1))
 
-    ∇yndx = length(yprev) + 1
-    c = fK\y
-    return MultiOutputRBFsurrogate(ms.ψ, X, K, fK, y, c, ms.∇xndx, ∇yndx)
+    M = s.known_observed
+    first_row = vcat(first_row, eval_KxX(s.ψ, xnew, s.X[:, 1:M]))
+    remainder_rows = hcat(remainder_rows, eval_∇KxX(s.ψ, xnew, s.X[:, 1:M]))
+
+    if s.fantasies_observed > 1
+        # Handles the case where there are previous fantasy observations
+        for j in 1:s.fantasies_observed - 1
+            M += 1
+            # 2. Compute covariance of function observation against function observations
+            first_row = vcat(first_row, eval_KxX(s.ψ, xnew, s.X[:, M:M]))
+            # 2. Compute covariance of gradient observation against function observations
+            remainder_rows = hcat(remainder_rows, eval_∇KxX(s.ψ, xnew, s.X[:, M:M]))
+            
+            # 3. Compute covariance of function observation against gradient observations
+            first_row = vcat(first_row, eval_∇KxX(s.ψ, xnew, s.X[:, M:M]))
+            # 3. Compute covariance of gradient observation against gradient observations
+            remainder_rows = hcat(remainder_rows, eval_Hk(s.ψ, xnew - s.X[:, M:M]))
+        end
+    end
+
+    # B contains the current fantasy and gradient observations covariances against all previous observations.
+    # B should be of size = (d + 1, m + (i - 1) * (d + 1))
+    B = [first_row'; remainder_rows]
+
+    M, i = s.known_observed, s.fantasies_observed
+    # Compute update location for B to insert into K
+    brow_stride(j) = M + (j - 1) * (d + 1) + 1 : M + j * (d + 1)
+    bcol_stride(j) = 1 : M + (j - 1) * (d + 1)
+    s.K[brow_stride(i), bcol_stride(i)] = B
+    s.K[bcol_stride(i), brow_stride(i)] = B'
+
+    C = eval_Dk(s.ψ, xnew - xnew; D=d) + s.σn2 * I
+    crow_stride(j) = M + (j - 1) * (d + 1) + 1 : M + j * (d + 1)
+    ccol_stride(j) = crow_stride(j)
+    s.K[crow_stride(i), ccol_stride(i)] = C # C = eval_Dk(s.ψ, xnew - xnew)
+
+    ###########################################################################################
+
+    ############################ Cholesky Factorization Update Step ###########################
+    i = s.fantasies_observed
+    Andx = s.known_observed + (s.fantasies_observed - 1) * (d + 1)
+    # We already have a handle on B and C, so we need to get the current A
+    L11 = @view s.L[1:Andx, 1:Andx]
+    L21 = B / L11'
+    L22 = cholesky(C - L21*L21').L
+
+    s.L[brow_stride(i), bcol_stride(i)] = L21
+    s.L[crow_stride(i), ccol_stride(i)] = L22
+    ###########################################################################################
+
+    # Add new observation to known observations
+    y = vcat(s.y .+ s.ymean, ynew) # Recover inherent y and add new observation
+    s.ymean = mean(y) # Compute the updated mean
+    s.y = y .- s.ymean
+
+    # Recover the inherent ∇y and add new observation
+    ∇y = Matrix{Float64}(undef, d, 0)
+    for j in 1:size(s.∇y, 2)
+        ∇y = hcat(∇y, s.∇y[:, j] .+ s.∇ymean)
+    end
+    s.∇y = hcat(∇y, ∇ynew)
+    s.∇ymean = mean(s.∇ymean, dims=2) # Compute the updated gradient mean
+
+    # Update the linear solve for c = K^-1 * y
+    slice = 1:s.known_observed + s.fantasies_observed * (d + 1)
+    y = s.y[1:s.known_observed]
+    for j in 1:s.fantasies_observed
+        y = vcat(y, s.y[s.known_observed + j])
+        y = vcat(y, s.∇y[:, j])
+    end
+    s.c = s.L[slice, slice] \ (s.L[slice, slice]' \ y)
+
+    return
 end
 
-
-function eval(ms::MultiOutputRBFsurrogate, x::Vector{Float64}, ymin::Real)
+function eval(ms::MultiOutputFantasyRBFsurrogate, x::Vector{Float64}, ymin::Real)
     msx = LazyStruct()
     set(msx, :ms, ms)
     set(msx, :x, x)
     set(msx, :ymin, ymin)
 
-    d, N = size(ms.X)
+    d, N = size(ms.X, 1), ms.known_observed + ms.fantasies_observed
+    slice = ms.known_observed + ms.fantasies_observed * (d + 1)
 
-    msx.kx = () -> eval_mixed_KxX(ms.ψ, ms.X, x; j_∇=ms.∇xndx)
-    msx.μ = () -> msx.kx * ms.c
+    # I need to ensure the appropriate rows of kx are acting on the appropriate rows of c
+    # Need to refactor eval_mixed_KxX
+    # msx.kx = () -> eval_mixed_KxX(ms.ψ, ms.X[:, 1:N], x; j_∇=ms.known_observed+1)'
+    msx.kx = () -> eval_mixed_KxX(ms, x)
+    msx.μ = () -> msx.kx' * ms.c .+ ms.ymean
+
+    msx.w = () -> ms.L[1:slice, 1:slice]' \ (ms.L[1:slice, 1:slice] \ msx.kx)
+    msx.σ = () -> cholesky(
+        Hermitian(
+            eval_Dk(ms.ψ, zeros(d); D=d) - msx.kx' * msx.w
+        )
+    ).L
     
     return msx
 end
 
-function eval(s::MultiOutputRBFsurrogate, x::Vector{Float64})
-    y = s.y[1:s.∇yndx-1]
+function eval(s::MultiOutputFantasyRBFsurrogate, x::Vector{Float64})
+    y = s.y[1:s.known_observed]
     return eval(s, x, minimum(y))
 end
-(s::MultiOutputRBFsurrogate)(x::Vector{Float64}) = eval(s, x)
+(s::MultiOutputFantasyRBFsurrogate)(x::Vector{Float64}) = eval(s, x)
+
 
 """
 Given a multi-output GP surrogate and a point x, draw a sample from the
 posterior distribution of the function value and its gradient at x.
 """
-function gp_draw(ms::MultiOutputRBFsurrogate, xloc; stdnormal)
+
+function gp_draw(ms::MultiOutputFantasyRBFsurrogate, xloc; stdnormal)
     msx = ms(xloc)
-    m = msx.μ
-    Ksx = eval_mixed_KxX(ms.ψ, ms.X, xloc; j_∇=ms.∇xndx)
-    Kss = eval_mixed_Kxx(ms.ψ, xloc)
-    Kxx = eval_mixed_KXX(ms.ψ, ms.X; j_∇=ms.∇xndx)
-    K = Kss - Ksx*(Kxx\Ksx')
-    L = cholesky(Matrix(Hermitian(K)), Val(true), check = false).U'
-    sample = m + L*stdnormal
+    sample = msx.μ + msx.σ*stdnormal
     f, ∇f = sample[1], sample[2:end]
     return f, ∇f
+end
+
+function get_observations(s::Union{RBFsurrogate, FantasyRBFsurrogate, MultiOutputFantasyRBFsurrogate})
+    return s.y .+ s.ymean
 end
 
 # ------------------------------------------------------------------
@@ -491,22 +757,18 @@ function ∇log_likelihood_v(s :: RBFsurrogate)
     ∇L
 end
 
-function optimize_hypers_optim(s::RBFsurrogate, ψconstructor)    
+# Surrogate isn't necessary here. Just need X, theta, and y.
+function optimize_hypers_optim(s::RBFsurrogate, ψconstructor; σn2=1e-6)    
     # θ contains kernel variance and lengthscale parameters [σf, l]
     function f(θ)
-        scaled_ψ = kernel_scale(ψconstructor, θ)
-        ψref = kernel_matern52([1.])
-        lsur = fit_surrogate(scaled_ψ, s.X, s.y)
-        Lref = log_likelihood(fit_surrogate(ψref, s.X, s.y))
-        return log_likelihood(lsur)/Lref
+        ψ = kernel_scale(ψconstructor, θ)
+        lsur = fit_surrogate(ψ, s.X, s.y; σn2=σn2)
+        return -log_likelihood(lsur)
     end
 
-    # res = optimize(θ -> log_likelihood(fit_surrogate(θ, s.X, s.y))/Lref,
-    #                s.ψ.θ, LBFGS(), Optim.Options(show_trace=true))
-    θinit = [1., s.ψ.θ[1]]
-    lowerbounds = [1e-3, 1e-3]
-    # upperbounds = [Inf, Inf]
-    upperbounds = [10., 10.]
+    θinit = [1., s.ψ.θ[1]] # σf, l
+    lowerbounds = [1e-5, 1e-5]
+    upperbounds = [3., 3.]
     res = optimize(f, lowerbounds, upperbounds, θinit)
 
     return res
