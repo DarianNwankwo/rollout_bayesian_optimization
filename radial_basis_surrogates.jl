@@ -33,6 +33,7 @@ function fit_surrogate(ψ::RBFfun, X::Matrix{Float64}, y::Vector{Float64}; σn2=
     return RBFsurrogate(ψ, X, K, L, y, c, σn2, ymean)
 end
 
+# TODO: Change to a function that updates the object in place
 function update_surrogate(s::RBFsurrogate, xnew::Vector{Float64}, ynew::Float64)
     X = hcat(s.X, xnew)
     y = vcat(s.y .+ s.ymean, ynew) # Recovery y and add new observation
@@ -78,8 +79,9 @@ function plot1D(s::RBFsurrogate; xmin=-1, xmax=1, npts=100)
         σ[i] = sx.σ
     end
 
-    plot(x, μ, ribbons=2σ, label="μ±2σ")
+    p = plot(x, μ, ribbons=2σ, label="μ±2σ (Ground Truth)")
     scatter!(s.X[1,:], get_observations(s), label="Observations")
+    return p
 end
 
 function eval(s::RBFsurrogate, x::Vector{Float64}, ymin::Real)
@@ -320,7 +322,7 @@ function eval(fs::FantasyRBFsurrogate, x::Vector{Float64}, ymin::Real)
     end
 
     sx.w = () -> fs.L[slice, slice]'\(fs.L[slice, slice]\sx.kx)
-    sx.Dw = () -> fs.L[slice, slice]'(fs.L[slice, slice]\(sx.∇kx'))
+    sx.Dw = () -> fs.L[slice, slice]'\(fs.L[slice, slice]\(sx.∇kx'))
     sx.∇w = () -> sx.Dw'
     sx.σ = () -> sqrt(fs.ψ(0) - dot(sx.kx', sx.w))
     sx.∇σ = () -> -(sx.∇kx * sx.w) / sx.σ
@@ -420,6 +422,22 @@ end
 
 eval(fs::FantasyRBFsurrogate, x::Vector{Float64}) = eval(fs, x, minimum(fs.y) + fs.ymean)
 (fs::FantasyRBFsurrogate)(x::Vector{Float64}) = eval(fs, x)
+
+function plot1D(s::FantasyRBFsurrogate; xmin=-1, xmax=1, npts=100)
+    x = range(xmin, stop=xmax, length=npts)
+    μ, σ = zeros(npts), zeros(npts)
+
+    for i = 1:npts
+        sx = s([x[i]])
+        μ[i] = sx.μ
+        σ[i] = sx.σ
+    end
+
+    p = plot(x, μ, ribbons=2σ, label="μ±2σ (Fantasy RBF surrogate)")
+    scatter!(s.X[1,:], get_observations(s), label="Observations")
+    return p
+end
+
 
 # ------------------------------------------------------------------
 # 3. Operations on GP/RBF surrogate derivatives wrt node positions
@@ -532,6 +550,35 @@ mutable struct MultiOutputFantasyRBFsurrogate
     fantasies_observed::Int64
 end
 
+function eval_mixed_KxX(ms::MultiOutputFantasyRBFsurrogate, x::Vector{Float64})
+    first_row = Vector{Float64}(undef, 0) # the final size of this should be m + (i - 1) * (d + 1)
+    remainder_rows = Matrix{Float64}(undef, d, 0) # the final size of this should be d x (m + (i - 1) * (d + 1))
+
+    M = ms.known_observed
+    # Compute covariance of new function observation against function observations
+    first_row = vcat(first_row, eval_KxX(ms.ψ, x, ms.X[:, 1:M]))
+    remainder_rows = hcat(remainder_rows, eval_∇KxX(ms.ψ, x, ms.X[:, 1:M]))
+
+    # Compute covariance of new gradient observation against function observations and gradient observations
+    # Handles the case where there are previous fantasy observations
+    for j in 1:ms.fantasies_observed
+        M += 1
+        # 2. Compute covariance of function observation against function observations
+        first_row = vcat(first_row, eval_KxX(ms.ψ, x, ms.X[:, M:M]))
+        # 2. Compute covariance of gradient observation against function observations
+        remainder_rows = hcat(remainder_rows, eval_∇KxX(ms.ψ, x, ms.X[:, M:M]))
+        
+        # 3. Compute covariance of function observation against gradient observations
+        first_row = vcat(first_row, -eval_∇KxX(ms.ψ, x, ms.X[:, M:M]))
+        # 3. Compute covariance of gradient observation against gradient observations
+        remainder_rows = hcat(remainder_rows, -eval_Hk(ms.ψ, x - ms.X[:, M:M]))
+        # remainder_rows = hcat(remainder_rows, eval_Hk(ms.ψ, x - ms.X[:, M:M]))
+    end
+
+    KxX = [first_row'; remainder_rows]
+    return KxX
+end
+
 function fit_multioutput_fsurrogate(s::RBFsurrogate, h::Int64)
     d, N = size(s.X)
     max_rows = N + (d+1) * (h + 1)
@@ -566,6 +613,8 @@ end
 function update_multioutput_fsurrogate!(s::MultiOutputFantasyRBFsurrogate, xnew::Vector{Float64},
     ynew::Float64, ∇ynew::Vector{Float64})
     @assert s.fantasies_observed < s.h + 1 "Cannot add more fantasies than the number of fantasies specified in the surrogate"
+    if s.fantasies_observed == 0 s.∇ymean = ∇ynew end
+
     update_ndx = s.known_observed + s.fantasies_observed + 1
     d, N = size(s.X, 1), s.known_observed + s.fantasies_observed
 
@@ -593,9 +642,10 @@ function update_multioutput_fsurrogate!(s::MultiOutputFantasyRBFsurrogate, xnew:
             remainder_rows = hcat(remainder_rows, eval_∇KxX(s.ψ, xnew, s.X[:, M:M]))
             
             # 3. Compute covariance of function observation against gradient observations
-            first_row = vcat(first_row, eval_∇KxX(s.ψ, xnew, s.X[:, M:M]))
+            first_row = vcat(first_row, -eval_∇KxX(s.ψ, xnew, s.X[:, M:M]))
             # 3. Compute covariance of gradient observation against gradient observations
-            remainder_rows = hcat(remainder_rows, eval_Hk(s.ψ, xnew - s.X[:, M:M]))
+            # remainder_rows = hcat(remainder_rows, -eval_Hk(s.ψ, xnew - s.X[:, M:M]))
+            remainder_rows = hcat(remainder_rows, -eval_Hk(s.ψ, xnew - s.X[:, M:M]))
         end
     end
 
@@ -608,7 +658,8 @@ function update_multioutput_fsurrogate!(s::MultiOutputFantasyRBFsurrogate, xnew:
     brow_stride(j) = M + (j - 1) * (d + 1) + 1 : M + j * (d + 1)
     bcol_stride(j) = 1 : M + (j - 1) * (d + 1)
     s.K[brow_stride(i), bcol_stride(i)] = B
-    s.K[bcol_stride(i), brow_stride(i)] = B'
+    # s.K[bcol_stride(i), brow_stride(i)] = [B[1,:]'; -B[2:end, :]]' # previous: B'
+    s.K[bcol_stride(i), brow_stride(i)] = B' # previous: B'
 
     C = eval_Dk(s.ψ, xnew - xnew; D=d) + s.σn2 * I
     crow_stride(j) = M + (j - 1) * (d + 1) + 1 : M + j * (d + 1)
@@ -639,8 +690,14 @@ function update_multioutput_fsurrogate!(s::MultiOutputFantasyRBFsurrogate, xnew:
     for j in 1:size(s.∇y, 2)
         ∇y = hcat(∇y, s.∇y[:, j] .+ s.∇ymean)
     end
-    s.∇y = hcat(∇y, ∇ynew)
-    s.∇ymean = mean(s.∇ymean, dims=2) # Compute the updated gradient mean
+    ∇y = hcat(∇y, ∇ynew)
+    s.∇ymean = vec(mean(∇y, dims=2)) # Compute the updated gradient mean
+
+    # Offset the recovered ∇y and ∇ynew by the updated gradient mean
+    for j in 1:size(∇y, 2)
+        ∇y[:, j] -= s.∇ymean
+    end
+    s.∇y = ∇y # Subtract the gradient mean from the gradient mean
 
     # Update the linear solve for c = K^-1 * y
     slice = 1:s.known_observed + s.fantasies_observed * (d + 1)
@@ -649,8 +706,8 @@ function update_multioutput_fsurrogate!(s::MultiOutputFantasyRBFsurrogate, xnew:
         y = vcat(y, s.y[s.known_observed + j])
         y = vcat(y, s.∇y[:, j])
     end
-    s.c = s.L[slice, slice] \ (s.L[slice, slice]' \ y)
 
+    s.c = s.L[slice, slice]' \ (s.L[slice, slice] \ y)
     return
 end
 
@@ -667,14 +724,22 @@ function eval(ms::MultiOutputFantasyRBFsurrogate, x::Vector{Float64}, ymin::Real
     # Need to refactor eval_mixed_KxX
     # msx.kx = () -> eval_mixed_KxX(ms.ψ, ms.X[:, 1:N], x; j_∇=ms.known_observed+1)'
     msx.kx = () -> eval_mixed_KxX(ms, x)
-    msx.μ = () -> msx.kx' * ms.c .+ ms.ymean
+    msx.μ = function ()
+        μ = msx.kx * ms.c
+        μ[1] += ms.ymean
+        μ[2:end] += ms.∇ymean
+        return μ
+    end
 
-    msx.w = () -> ms.L[1:slice, 1:slice]' \ (ms.L[1:slice, 1:slice] \ msx.kx)
-    msx.σ = () -> cholesky(
-        Hermitian(
-            eval_Dk(ms.ψ, zeros(d); D=d) - msx.kx' * msx.w
-        )
-    ).L
+    msx.w = () -> ms.L[1:slice, 1:slice]' \ (ms.L[1:slice, 1:slice] \ msx.kx')
+    # msx.w = function()
+    #     KxX = msx.kx
+    #     KxX_t = [KxX[1, :]'; -KxX[2:end, :]]'
+    #     return ms.L[1:slice, 1:slice]' \ (ms.L[1:slice, 1:slice] \ KxX_t)
+    # end
+    msx.σ = () -> sqrt.(
+        diag(eval_Dk(ms.ψ, zeros(d); D=d) - msx.kx * msx.w)
+    )
     
     return msx
 end
@@ -685,6 +750,23 @@ function eval(s::MultiOutputFantasyRBFsurrogate, x::Vector{Float64})
 end
 (s::MultiOutputFantasyRBFsurrogate)(x::Vector{Float64}) = eval(s, x)
 
+function plot1D(s::MultiOutputFantasyRBFsurrogate; xmin=-1, xmax=1, npts=100)
+    x = range(xmin, stop=xmax, length=npts)
+    x = filter(v -> !(v in s.X), x)
+    npts = length(x)
+    μ, σ = zeros(npts), zeros(npts)
+
+    for i = 1:npts
+        sx = s([x[i]])
+        μ[i] = first(sx.μ)
+        σ[i] = first(sx.σ)
+    end
+
+    p = plot(x, μ, ribbons=2σ, label="μ±2σ")
+    total = s.known_observed + s.fantasies_observed
+    scatter!(s.X[1, 1:total], get_observations(s), label="Observations")
+    return p
+end
 
 """
 Given a multi-output GP surrogate and a point x, draw a sample from the
@@ -700,6 +782,10 @@ end
 
 function get_observations(s::Union{RBFsurrogate, FantasyRBFsurrogate, MultiOutputFantasyRBFsurrogate})
     return s.y .+ s.ymean
+end
+
+function get_grad_observations(s::MultiOutputFantasyRBFsurrogate)
+    return s.∇y .+ s.∇ymean
 end
 
 # ------------------------------------------------------------------

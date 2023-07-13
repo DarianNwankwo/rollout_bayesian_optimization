@@ -366,7 +366,7 @@ Given a radial basis function, an arbitrary point, and a matrix of observations,
 evaluate the gradient of the covariance vector between the point and the
 observations.
 """
-
+# TODO: If the sign of r is negative, our covariance measure is wrong by a factor of -1.
 function eval_∇KxX(rbf::RBFfun, x::Vector{Float64}, X::Matrix{Float64})
     d, N = size(X)
     ∇KxX = zeros(d, N)
@@ -418,34 +418,6 @@ function eval_mixed_KxX(rbf::RBFfun, X::Matrix{Float64}, x::Vector{Float64};
          K∇xX K∇x∇X]
 
     return K
-end
-
-function eval_mixed_KxX(ms::MultiOutputFantasyRBFsurrogate, x::Vector{Float64})
-    first_row = Vector{Float64}(undef, 0) # the final size of this should be m + (i - 1) * (d + 1)
-    remainder_rows = Matrix{Float64}(undef, d, 0) # the final size of this should be d x (m + (i - 1) * (d + 1))
-
-    M = ms.known_observed
-    first_row = vcat(first_row, eval_KxX(ms.ψ, x, ms.X[:, 1:M]))
-    remainder_rows = hcat(remainder_rows, eval_∇KxX(s.ψ, x, ms.X[:, 1:M]))
-
-    if ms.fantasies_observed > 1
-        # Handles the case where there are previous fantasy observations
-        for j in 1:s.fantasies_observed - 1
-            M += 1
-            # 2. Compute covariance of function observation against function observations
-            first_row = vcat(first_row, eval_KxX(ms.ψ, x, ms.X[:, M:M]))
-            # 2. Compute covariance of gradient observation against function observations
-            remainder_rows = hcat(remainder_rows, eval_∇KxX(ms.ψ, x, ms.X[:, M:M]))
-            
-            # 3. Compute covariance of function observation against gradient observations
-            first_row = vcat(first_row, eval_∇KxX(ms.ψ, x, ms.X[:, M:M]))
-            # 3. Compute covariance of gradient observation against gradient observations
-            remainder_rows = hcat(remainder_rows, eval_Hk(ms.ψ, x - ms.X[:, M:M]))
-        end
-    end
-
-    KxX = [first row'; remainder_rows]
-    return KxX
 end
 
 function eval_mixed_Kxx(rbf::RBFfun, x::Vector{Float64}; σn2=1e-6)

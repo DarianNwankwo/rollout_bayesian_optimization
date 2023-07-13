@@ -8,6 +8,7 @@ mutable struct Trajectory
     ms::MultiOutputFantasyRBFsurrogate
     opt_HEI::Matrix{Float64}
     fopt::Float64
+    h::Int
 end
 
 """
