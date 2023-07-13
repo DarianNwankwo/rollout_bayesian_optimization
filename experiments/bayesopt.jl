@@ -66,7 +66,7 @@ using CSV
 using Tables
 using DataFrames
 
-addprocs(4)
+# addprocs(4)
 println("Total Workers: $(nworkers())")
 
 @everywhere include("../rollout.jl")
@@ -139,7 +139,12 @@ for trial in 1:NUM_TRIALS
         results = @distributed (append!) for j = 1:size(batch, 2)
             x0 = batch[:, j]
 
-            res = stochastic_gradient_ascent_adam(x0;
+            # res = stochastic_gradient_ascent_adam(x0;
+            #     max_sgd_iters=MAX_SGD_ITERS, lbs=lbs, ubs=ubs, mc_iters=MC_SAMPLES, objective=OBJECTIVE,
+            #     lds_rns=lds_rns, horizon=HORIZON, sur=sur, gtol=1e-10, ftol=1e-8, max_counter=10
+            # )
+
+            res = stochastic_gradient_ascent_adam_efficient(x0;
                 max_sgd_iters=MAX_SGD_ITERS, lbs=lbs, ubs=ubs, mc_iters=MC_SAMPLES, objective=OBJECTIVE,
                 lds_rns=lds_rns, horizon=HORIZON, sur=sur, gtol=1e-10, ftol=1e-8, max_counter=10
             )
@@ -147,25 +152,6 @@ for trial in 1:NUM_TRIALS
             [res]
         end # END @distributed
 
-        # @sync @distributed for j = 1:size(batch, 2)
-        #     x0 = batch[:, j]
-
-        #     res = stochastic_gradient_ascent_adam(x0;
-        #         max_sgd_iters=MAX_SGD_ITERS, lbs=lbs, ubs=ubs, mc_iters=MC_SAMPLES,
-        #         lds_rns=lds_rns, horizon=HORIZON, sur=sur, gtol=1e-10, ftol=1e-8, max_counter=10
-        #     )
-        # end # END @distributed
-
-        # for j = 1:size(batch, 2)
-        #     x0 = batch[:, j]
-
-        #     res = stochastic_gradient_ascent_adam(x0;
-        #         max_sgd_iters=MAX_SGD_ITERS, lbs=lbs, ubs=ubs, mc_iters=MC_SAMPLES,
-        #         lds_rns=lds_rns, horizon=HORIZON, sur=sur, gtol=1e-10, ftol=1e-8, max_counter=10
-        #     )
-        #     push!(results, res)
-        # end
-        
         if length(results) == 0
             start = finish = rand(testfn.dim) .* (ubs - lbs) + lbs
             push!(results, (start=start, finish=finish, final_obj=nothing, final_grad=nothing, iters=0, success=true))
