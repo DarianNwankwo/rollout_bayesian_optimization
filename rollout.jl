@@ -21,87 +21,53 @@ include("rbf_optim.jl")
 include("trajectory.jl")
 include("utils.jl")
 
-"""
-TODO: We should be able to use the same trajectory object to compute
-trajectory samples instead of reconstructing a new object when the location
-hasn't changed.
-"""
-
 function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn2=1e-6, objective=:EI, num_starts=64,
-    rnstream)
-    fbest = T.fopt
-    x0 = T.xfs[:, 1]
-    
-    # (Inquiry) This assumption about having gradient information might be hurting us
-    # Sample a fantasized value and gradient at x0
-    f0 = gp_draw(T.s, x0, stdnormal=rnstream[1,1])
-    h, E, ∇f0 = 1e-8, I(length(x0)), zeros(length(x0))
-    for d in 1:length(x0)
-        xplus = x0 + E[:, d] * h
-        xminus = x0 - E[:, d] * h
-        fplus = gp_draw(T.s, xplus, stdnormal=rnstream[d, 1])
-        fminus = gp_draw(T.s, xminus, stdnormal=rnstream[d, 1])
-        ∇f0[d] = (fplus - fminus) / (2h)
-    end
-    sx0 = T.s(x0)
+    rnstream, xstarts)
+    f0, ∇f0 = gp_draw(T.mfs, T.x0; stdnormal=rnstream[:,1])
+    f0, ∇f0 = f0 + T.fs.ymean, ∇f0 .+ T.mfs.∇ymean
+
+    # Evaluate the surrogate at the initial location
+    sx0 = T.fs(x0)
     T.opt_HEI = sx0.HEI
-    δsx0 = zeros(length(x0))
-    if sx0.EI > 0
-        δsx0 = -sx0.HEI \ T.δs(sx0).∇EI
-    end
+    δx0 = rand(length(x0))
 
     # Update surrogate, perturbed surrogate, and multioutput surrogate
-    T.s = update_surrogate(T.s, x0, f0)
-    T.δs = update_δsurrogate(T.s, T.δs, δsx0, ∇f0)
-    T.ms = update_multioutput_surrogate(T.ms, x0, f0, ∇f0)
+    update_fsurrogate!(T.fs, x0, f0)
+    update_δsurrogate!(T.δfs, T.fs, δx0, ∇f0)
+    update_multioutput_fsurrogate!(T.mfs, x0, f0,  ∇f0)
 
-    T.ys[1] = f0
-    T.∇ys[:, 1] = ∇f0
-    T.xfs[:, 1] = x0
-
-    # Perform rollout for the fantasized trajectories
-    ϵ = 1e-6
-    s = SobolSeq(lbs, ubs)
-
-    xstarts = reduce(hcat, next!(s) for i = 1:num_starts)
-    xstarts = hcat(xstarts, lbs .+ ϵ)
-    xstarts = hcat(xstarts, ubs .- ϵ)
+    # Setup up evaluation locations for newton solves
     xnext = zeros(length(x0))
+
+    # Perform rollout for fantasized trajectories
     for j in 1:T.h
         # Solve base acquisition function to determine next sample location
-        if objective == :EI
-            xnext = multistart_ei_solve(T.s, lbs, ubs, xstarts)
-        else
-            xnext = multistart_log_ei_solve(T.s, lbs, ubs, xstarts)
-        end
+        xnext = multistart_ei_solve(T.fs, lbs, ubs, xstarts)
 
         # Draw fantasized sample at proposed location after base acquisition solve
-        fi, ∇fi = gp_draw(T.ms, xnext; stdnormal=rnstream[:, j+1])
-        
-        # Compute variations in xnext and update surrogate, perturbed surrogate,
-        # and multioutput surrogate
-        sxnext = T.s(xnext)
-        δsxnext = zeros(length(xnext))
-        if sxnext.EI > 0
-            δsxnext = -sxnext.HEI \ T.δs(sxnext).∇EI
+        fi, ∇fi = gp_draw(T.mfs, xnext; stdnormal=rnstream[:, j+1])
+        fi, ∇fi = fi + T.fs.ymean, ∇fi .+ T.mfs.∇ymean
+
+        # Evaluate the surrogate at the initial location
+        sxi = T.fs(xnext)
+        δxi = zeros(length(xnext))
+        if sx0.EI > 0
+            δxi = -sxi.HEI \ T.δfs(sxi).∇EI
         end
-        # δsxnext = -sxnext.HEI \ T.δs(sxnext).∇EI
 
         # Update hessian if a new best is found on trajectory
-        if fi < fbest
-            fbest = fi
-            T.opt_HEI = sxnext.HEI
+        if fi < T.fmin
+            T.fmin = fi
+            T.opt_HEI = sxi.HEI
         end
-        
-        T.s = update_surrogate(T.s, xnext, fi)
-        T.δs = update_δsurrogate(T.s, T.δs, δsxnext, ∇fi)
-        T.ms = update_multioutput_surrogate(T.ms, xnext, fi, ∇fi)
-
-        # Update trajectory path
-        T.xfs[:, j+1] = xnext
-        T.ys[j+1] = fi
-        T.∇ys[:, j+1] = ∇fi
+       
+        # Update surrogate, perturbed surrogate, and multioutput surrogate
+        update_fsurrogate!(T.fs, xnext, fi)
+        update_δsurrogate!(T.δfs, T.fs, δxi, ∇fi)
+        update_multioutput_fsurrogate!(T.mfs, xnext, fi,  ∇fi)
     end
+
+    return nothing
 end
 
 function sample(T::Trajectory)
@@ -147,6 +113,7 @@ function visualize1D(T::Trajectory)
     )
     vline!(0:T.h, color=:black, linestyle=:dash, linewidth=1, label=nothing, alpha=.2)
     scatter!(0:T.h, T.xfs[1, :], color=:red, label=nothing)
+    # lbs, ubs not defined
     yticks!(
         round.(range(lbs[1], ubs[1], length=11), digits=1)
     )

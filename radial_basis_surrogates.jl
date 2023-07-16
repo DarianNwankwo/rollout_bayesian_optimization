@@ -248,12 +248,24 @@ end
 
 function reset_fsurrogate!(fs::FantasyRBFsurrogate, s::RBFsurrogate)
     d, N = size(s.X)
+    # Reset preallocated X
     fs.X[:, 1:N] = @view s.X[:, 1:N]
+    fs.X[:, N+1:end] .= 0.0
+    # Reset preallocated K and L
     fs.K[1:N, 1:N] = @view s.K[:,:]
+    fs.K[N+1:end, N+1:end] .= 0.0
+    fs.K[1:N, N+1:end] .= 0.0
+    fs.K[N+1:end, 1:N] .= 0.0
     fs.L[1:N, 1:N] = @view s.L[:,:]
+    fs.L[N+1:end, N+1:end] .= 0.0
+    fs.L[1:N, N+1:end] .= 0.0
+    fs.L[N+1:end, 1:N] .= 0.0
+    # Reset y and ymean
     fs.ymean = s.ymean
     fs.y = s.y
     fs.fantasies_observed = 0
+    # Update coefficient vector
+    fs.c = s.c
     return
 end
 
@@ -308,14 +320,15 @@ function eval(fs::FantasyRBFsurrogate, x::Vector{Float64}, ymin::Real)
     d, N = size(fs.X)
     slice = 1:fs.known_observed + fs.fantasies_observed
 
-    sx.kx = () -> eval_KxX(fs.ψ, x, fs.X)
-    sx.∇kx = () -> eval_∇KxX(fs.ψ, x, fs.X)
+    sx.kx = () -> eval_KxX(fs.ψ, x, fs.X[:, slice])
+    sx.∇kx = () -> eval_∇KxX(fs.ψ, x, fs.X[:, slice])
 
     sx.μ = () -> dot(sx.kx, fs.c) + fs.ymean
     sx.∇μ = () -> sx.∇kx * fs.c
     sx.Hμ = function()
         H = zeros(d, d)
-        for j = 1:N
+        # for j = 1:N
+        for j = slice
             H += fs.c[j] * eval_Hk(fs.ψ, x-fs.X[:,j])
         end
         return H
@@ -329,7 +342,8 @@ function eval(fs::FantasyRBFsurrogate, x::Vector{Float64}, ymin::Real)
     sx.Hσ = function()
         H = -sx.∇σ * sx.∇σ' - sx.∇kx * sx.Dw
         w = sx.w
-        for j = 1:N
+        # for j = 1:N
+        for j = slice
             H -= w[j] * eval_Hk(fs.ψ, x-fs.X[:,j])
         end
         H /= sx.σ
@@ -465,7 +479,26 @@ function fit_δsurrogate(fs::FantasyRBFsurrogate, δX::Matrix{Float64}, ∇ys::V
     return δRBFsurrogate(fs, δXpreallocate, δK, δy, δc, δymean)
 end
 
-function reset_δsurrogate!(δs::δRBFsurrogate, fs::RBFsurrogate)
+function reset_δsurrogate!(δs::δRBFsurrogate, fs::FantasyRBFsurrogate)
+    # Reset base fantasized surrogate given a resetted fantasized surrogate
+    δs.fs = fs
+    # Reset the preallocated perturbation matrix δX
+    δs.X[:, :] .= 0.0
+    # Zero out fantasized entries of covariance matrix 
+    M = fs.known_observed + 1
+    δs.K[M:end, :] .= 0.0
+    δs.K[:, M:end] .= 0.0
+    # Reset the perturbation vector
+    ∇ys = [zeros(d) for i in 1:M-1]
+    δs.y = [dot(∇ys[j], δs.X[:,j]) for j=1:M-1]
+    δs.ymean = mean(δs.y)
+    δs.y .-= δs.ymean
+    # Update linear solve for coefficients
+    slice = 1:fs.known_observed
+    δs.c = fs.L[slice, slice]' \ (fs.L[slice, slice] \ (δs.y - δs.K[slice, slice]*fs.c))
+    # Update fantasies observed
+    δs.fs.fantasies_observed = 0
+    return nothing 
 end
 
 function update_δsurrogate!(δs::δRBFsurrogate, ufs::FantasyRBFsurrogate, δx::Vector{Float64}, ∇y::Vector{Float64})
@@ -489,9 +522,11 @@ function update_δsurrogate!(δs::δRBFsurrogate, ufs::FantasyRBFsurrogate, δx:
 
     slice = 1:update_ndx
     δs.K[slice, slice]*ufs.c
+    # Print the size of of the left hand side of the linear solve and the right hand side using
+    # string interpolation
     δs.c = ufs.L[slice, slice]\(δs.y - δs.K[slice, slice]*ufs.c)
 
-    return
+    return nothing
 end
 
 function eval(δs :: δRBFsurrogate, sx, δymin)
@@ -510,8 +545,8 @@ function eval(δs :: δRBFsurrogate, sx, δymin)
     δsx.μ  = () -> δsx.kx'*fs.c + sx.kx'*δs.c + δs.ymean
     δsx.∇μ = () -> δsx.∇kx*fs.c + sx.∇kx*δs.c
 
-    δsx.σ  = () -> (-2*δsx.kx'*sx.w + sx.w'*(δs.K[:, slice]*sx.w)) / (2*sx.σ)
-    δsx.∇σ = () -> (-δsx.∇kx*sx.w - sx.∇w*δsx.kx + sx.∇w*(δs.K[:, slice]*sx.w)-δsx.σ*sx.∇σ)/sx.σ
+    δsx.σ  = () -> (-2*δsx.kx'*sx.w + sx.w'*(δs.K[slice, slice]*sx.w)) / (2*sx.σ)
+    δsx.∇σ = () -> (-δsx.∇kx*sx.w - sx.∇w*δsx.kx + sx.∇w*(δs.K[slice, slice]*sx.w)-δsx.σ*sx.∇σ)/sx.σ
 
     δsx.z  = () -> (δymin-δsx.μ-sx.z*δsx.σ)/sx.σ
     δsx.∇z = () -> (-δsx.∇μ-sx.∇z*δsx.σ-sx.z*δsx.∇σ)/sx.σ - δsx.z/sx.σ*sx.∇σ
@@ -608,6 +643,27 @@ function fit_multioutput_fsurrogate(s::RBFsurrogate, h::Int64)
         s.ψ, X, K, L, copy(s.y), ∇y, c, s.σn2, s.ymean,
         ∇ymean, h, known_observed, fantasies_observed
     )
+end
+
+function reset_mfsurrogate!(mfs::MultiOutputFantasyRBFsurrogate, s::RBFsurrogate)
+    d, N = size(s.X)
+    # Reset preallocated fantasized locations
+    mfs.X[:, 1:N] = @view s.X[:,:]
+    mfs.X[:, N+1:end] .= 0
+
+    # K and L can stay the same, we just need to update the index
+    mfs.known_observed = N
+    mfs.fantasies_observed = 0
+
+    # Store known history observations separately from fantasized function and gradient values
+    mfs.∇ymean = zeros(d)
+    mfs.ymean = s.ymean
+    mfs.y = copy(s.y)
+
+    # Initial solve of the linear system with only known observations
+    mfs.c = s.L' \ (s.L \ s.y)
+
+    return nothing
 end
 
 function update_multioutput_fsurrogate!(s::MultiOutputFantasyRBFsurrogate, xnew::Vector{Float64},
@@ -749,6 +805,13 @@ function eval(s::MultiOutputFantasyRBFsurrogate, x::Vector{Float64})
     return eval(s, x, minimum(y))
 end
 (s::MultiOutputFantasyRBFsurrogate)(x::Vector{Float64}) = eval(s, x)
+
+function gp_draw(s::MultiOutputFantasyRBFsurrogate, x::Vector{Float64}; stdnormal)
+    sx = s(x)
+    f_and_∇f =  sx.μ + sx.σ .* stdnormal
+    f, ∇f = f_and_∇f[1], f_and_∇f[2:end]
+    return f, ∇f
+end
 
 function plot1D(s::MultiOutputFantasyRBFsurrogate; xmin=-1, xmax=1, npts=100)
     x = range(xmin, stop=xmax, length=npts)

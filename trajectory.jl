@@ -1,13 +1,14 @@
 include("radial_basis_surrogates.jl")
-include("covariance_matrix.jl")
 
 
 mutable struct Trajectory
-    s::FantasyRBFsurrogate
-    δs::δRBFsurrogate
-    ms::MultiOutputFantasyRBFsurrogate
-    opt_HEI::Matrix{Float64}
-    fopt::Float64
+    s::RBFsurrogate
+    fs::Union{FantasyRBFsurrogate, Nothing}
+    δfs::Union{δRBFsurrogate, Nothing}
+    mfs::Union{MultiOutputFantasyRBFsurrogate, Nothing}
+    opt_HEI::Union{Matrix{Float64}, Nothing}
+    fmin::Union{Float64, Nothing}
+    x0::Vector{Float64}
     h::Int
 end
 
@@ -15,20 +16,31 @@ end
 Consider giving the perturbed surrogate a zero matrix to handle computing variations
 in the surrogate at the initial point.
 """
-function Trajectory(s::RBFsurrogate, x0::Vector{Float64}, fndx::Int; h::Int, fopt::Float64)
+function Trajectory(s::RBFsurrogate, x0::Vector{Float64}, h::Int)
+    # The ground truth surrogate is zero mean, so when we sample from our GP, we
+    # need to add the mean back in when we are updating the surrogate.
+    fmin = minimum(s.y) + s.ymean
     d, N = size(s.X)
-    # Initialize base surrogates as placeholders
-    δs = δRBFsurrogate(s, zeros(d, N), s.K, s.y, s.c, 0.)
-    # δs = δRBFsurrogate(s, s.X, s.K, s.y, s.c)
-    ms = MultiOutputRBFsurrogate(
-        s.ψ, s.X, s.K, s.fK, s.y, s.c, N+1, length(s.y) + 1, 0., zeros(d)    
-    )
-    
-    # Preallocate memory for trajectory path and samples
-    xfs, ys, ∇ys = zeros(d, h+1), zeros(h+1), zeros(d, h+1)
-    xfs[:, 1] = x0
+
+    ∇ys = [zeros(d) for i in 1:N]
+    δX = zeros(d, N)
+
+    fsur = fit_fsurrogate(s, h)
+    δsur = fit_δsurrogate(fsur, δX, ∇ys)
+    mfsur = fit_multioutput_fsurrogate(sur, h)
 
     opt_HEI = zeros(d, d)
 
-    return Trajectory(s, δs, ms, xfs, ys, ∇ys, h, fndx, opt_HEI, fopt)
+    return Trajectory(s, fsur, δsur, mfsur, opt_HEI, fmin, x0, h)
+end
+
+function reset!(T::Trajectory)
+    fmin = minimum(T.s.y) + T.s.ymean
+    d, N = size(T.s.X)
+
+    reset_fsurrogate!(T.fs, T.s)
+    reset_δsurrogate!(T.δfs, T.fs)
+    reset_mfsurrogate!(T.mfs, T.s)
+
+    T.opt_HEI = zeros(d, d)
 end
