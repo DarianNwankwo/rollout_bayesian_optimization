@@ -15,6 +15,9 @@ end
 """
 Consider giving the perturbed surrogate a zero matrix to handle computing variations
 in the surrogate at the initial point.
+
+- TODO: Fix the logic associated with maintaining the minimum found along the sample path vs.
+that of the minimum from the best value known from the known locations.
 """
 function Trajectory(s::RBFsurrogate, x0::Vector{Float64}, h::Int)
     # The ground truth surrogate is zero mean, so when we sample from our GP, we

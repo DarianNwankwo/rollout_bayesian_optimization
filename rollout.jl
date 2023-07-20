@@ -27,17 +27,17 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn
     f0, ∇f0 = f0 + T.fs.ymean, ∇f0 .+ T.mfs.∇ymean
 
     # Evaluate the surrogate at the initial location
-    sx0 = T.fs(x0)
+    sx0 = T.fs(T.x0)
     T.opt_HEI = sx0.HEI
-    δx0 = rand(length(x0))
+    δx0 = rand(length(T.x0))
 
     # Update surrogate, perturbed surrogate, and multioutput surrogate
-    update_fsurrogate!(T.fs, x0, f0)
+    update_fsurrogate!(T.fs, T.x0, f0)
     update_δsurrogate!(T.δfs, T.fs, δx0, ∇f0)
-    update_multioutput_fsurrogate!(T.mfs, x0, f0,  ∇f0)
+    update_multioutput_fsurrogate!(T.mfs, T.x0, f0,  ∇f0)
 
     # Setup up evaluation locations for newton solves
-    xnext = zeros(length(x0))
+    xnext = zeros(length(T.x0))
 
     # Perform rollout for fantasized trajectories
     for j in 1:T.h
@@ -71,8 +71,16 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn
 end
 
 function sample(T::Trajectory)
-    path = [(x=T.xfs[:,i], y=T.ys[i], ∇y=T.∇ys[:,i]) for i in 1:T.h+1]
-    return path
+    @assert T.fs.fantasies_observed == T.h + 1 "Cannot sample from a trajectory that has not been rolled out"
+    fantasy_slice = T.fs.known_observed + 1 : T.fs.known_observed + T.fs.fantasies_observed
+    M = T.fs.known_observed
+    return [
+        (
+            x=T.mfs.X[:,i],
+            y=T.mfs.y[i] .+ T.mfs.ymean,
+            ∇y=T.mfs.∇y[:,i-M] .+ T.mfs.∇ymean,
+        ) for i in fantasy_slice
+    ]
 end
 
 function best(T::Trajectory)
@@ -83,17 +91,18 @@ function best(T::Trajectory)
 end
 
 function α(T::Trajectory)
-    m = T.fantasy_ndx-1
+    m = T.fs.known_observed - 1
     path = sample(T)
-    fmini = T.fopt
+    fmini = minimum(T.s.y) + T.s.ymean
     best_ndx, best_step = best(T)
-    fb = T.ys[best_ndx]
+    fb = best_step.y
+    # println("fb: $(fb) -- fmini: $(fmini)")
     return max(fmini - fb, 0.)
 end
 
 function ∇α(T::Trajectory)
-    m = T.fantasy_ndx-1
-    fmini = T.fopt
+    m = T.fs.known_observed - 1
+    fmini = minimum(T.s.y) + T.s.ymean
     best_ndx, best_step = best(T)
     xb, fb, ∇fb = best_step
     if fmini <= fb
@@ -101,7 +110,7 @@ function ∇α(T::Trajectory)
     end
     # Investigate the computations from the ground up and 
     # see where the sign error might have been introduced
-    return transpose(∇fb'*T.opt_HEI)
+    return transpose(-∇fb'*T.opt_HEI)
 end
 
 
