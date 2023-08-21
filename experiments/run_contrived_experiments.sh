@@ -2,13 +2,13 @@
 for i in 0 1 2 3 4; do
     if [ $i -eq 0 ]; then
         arg1=0
-        arg2=250
+        arg2=150
     elif [ $i -eq 1 ]; then
         arg1=1
-        arg2=350
+        arg2=250
     elif [ $i -eq 2 ]; then
         arg1=2
-        arg2=500
+        arg2=350
     elif [ $i -eq 3 ]; then
         arg1=3
         arg2=500
