@@ -28,7 +28,7 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn
 
     # Evaluate the surrogate at the initial location
     sx0 = T.fs(T.x0)
-    T.opt_HEI = sx0.HEI
+    # T.opt_HEI = sx0.HEI
     δx0 = rand(length(T.x0))
 
     # Update surrogate, perturbed surrogate, and multioutput surrogate
@@ -51,11 +51,12 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn
         # Evaluate the surrogate at the initial location
         sxi = T.fs(xnext)
         δxi = zeros(length(xnext))
-        if sx0.EI > 0
+        if sxi.EI > 0
             δxi = -sxi.HEI \ T.δfs(sxi).∇EI
         end
 
         # Update hessian if a new best is found on trajectory
+        # Should fi be fi + T.fs.ymean?
         if fi < T.fmin
             T.fmin = fi
             T.opt_HEI = sxi.HEI
@@ -93,14 +94,14 @@ end
 function α(T::Trajectory)
     m = T.fs.known_observed - 1
     path = sample(T)
-    fmini = minimum(T.s.y) + T.s.ymean
+    fmini = minimum(get_observations(T.s))
     best_ndx, best_step = best(T)
     fb = best_step.y
-    # println("fb: $(fb) -- fmini: $(fmini)")
     return max(fmini - fb, 0.)
 end
 
 function ∇α(T::Trajectory)
+    if T.h == 0 return T.fs(T.x0).∇EI end
     m = T.fs.known_observed - 1
     fmini = minimum(T.s.y) + T.s.ymean
     best_ndx, best_step = best(T)

@@ -46,6 +46,6 @@ function multistart_ei_solve(s::FantasyRBFsurrogate, lbs::Vector{Float64},
     
     mini, j_mini = findmin(pair -> pair[2], candidates)
     minimizer = candidates[j_mini][1]
-    
+
     return minimizer
 end

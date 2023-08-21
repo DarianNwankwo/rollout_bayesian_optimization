@@ -1,4 +1,4 @@
-include("covariance_matrix.jl")
+using Distributions
 
 """
 Generate low discrepancy Sobol sequence of uniform random variables
@@ -384,20 +384,6 @@ function poi(μ, σ, fbest)
     z = (fbest - μ) / σ
     Φz = Distributions.normcdf(z)
     return Φz
-end
-
-function measure_gap(sur::RBFsurrogate, fbest)
-    gaps = []
-    init_mini = sur.y[1] .+ sur.ymean
-    maximum_possible_reduction = init_mini - fbest
-    
-    for i in 1:length(sur.y)
-        cur_mini = minimum(sur.y[1:i]) .+ sur.ymean
-        gap = (init_mini - cur_mini) / maximum_possible_reduction
-        push!(gaps, gap)
-    end
-    
-    return gaps
 end
 
 function create_filename(dict::Dict{String, Any})

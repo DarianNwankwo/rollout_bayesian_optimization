@@ -66,6 +66,22 @@ function update_surrogate(s::RBFsurrogate, xnew::Vector{Float64}, ynew::Float64)
 
     L = update_cholesky(K, s.L)
     c = L'\(L\y)
+
+    return RBFsurrogate(s.ψ, X, K, L, y, c, s.σn2, ymean)
+end
+
+# TODO: Change to a function that updates the object in place
+function update_surrogate_slow(s::RBFsurrogate, xnew::Vector{Float64}, ynew::Float64)
+    X = hcat(s.X, xnew)
+    y = vcat(s.y .+ s.ymean, ynew) # Recovery y and add new observation
+    ymean = mean(y) # Compute new mean of observations
+    y .-= ymean # Offset observations to be zero mean
+
+    # Update covariance matrix and it's cholesky factorization
+    K = eval_KXX(s.ψ, X)
+    L = cholesky(K).L
+    c = L'\(L\y)
+
     return RBFsurrogate(s.ψ, X, K, L, y, c, s.σn2, ymean)
 end
 
@@ -106,7 +122,7 @@ function eval(s::RBFsurrogate, x::Vector{Float64}, ymin::Real)
     end
 
     sx.w = () -> s.L'\(s.L\sx.kx)
-    sx.Dw = () -> s.L'(s.L\(sx.∇kx'))
+    sx.Dw = () -> s.L'\(s.L\(sx.∇kx'))
     sx.∇w = () -> sx.Dw'
     sx.σ = () -> sqrt(s.ψ(0) - dot(sx.kx', sx.w))
     sx.∇σ = () -> -(sx.∇kx * sx.w) / sx.σ
@@ -243,7 +259,7 @@ function fit_fsurrogate(s::RBFsurrogate, h::Int64)
     X = zeros(d, N+h+1)
     slice = 1:N
     X[:, slice] = @view s.X[:,:] 
-    return FantasyRBFsurrogate(ψ, X, K, L, s.y, s.c, s.σn2, s.ymean, h, N, 0)
+    return FantasyRBFsurrogate(s.ψ, X, K, L, s.y, s.c, s.σn2, s.ymean, h, N, 0)
 end
 
 function reset_fsurrogate!(fs::FantasyRBFsurrogate, s::RBFsurrogate)
@@ -586,6 +602,7 @@ mutable struct MultiOutputFantasyRBFsurrogate
 end
 
 function eval_mixed_KxX(ms::MultiOutputFantasyRBFsurrogate, x::Vector{Float64})
+    d, N = size(ms.X)
     first_row = Vector{Float64}(undef, 0) # the final size of this should be m + (i - 1) * (d + 1)
     remainder_rows = Matrix{Float64}(undef, d, 0) # the final size of this should be d x (m + (i - 1) * (d + 1))
 
@@ -806,7 +823,7 @@ function eval(s::MultiOutputFantasyRBFsurrogate, x::Vector{Float64})
 end
 (s::MultiOutputFantasyRBFsurrogate)(x::Vector{Float64}) = eval(s, x)
 
-function gp_draw(s::MultiOutputFantasyRBFsurrogate, x::Vector{Float64}; stdnormal)
+function gp_draw(s::MultiOutputFantasyRBFsurrogate, x::Vector{Float64}; stdnormal::Vector{Float64})
     sx = s(x)
     f_and_∇f =  sx.μ + sx.σ .* stdnormal
     f, ∇f = f_and_∇f[1], f_and_∇f[2:end]
@@ -856,7 +873,8 @@ end
 # ------------------------------------------------------------------
 function log_likelihood(s :: RBFsurrogate)
     n = size(s.X)[2]
-    -s.y'*s.c/2 - sum(log.(diag(s.fK.L))) - n*log(2π)/2
+    # -s.y'*s.c/2 - sum(log.(diag(s.fK.L))) - n*log(2π)/2
+    -s.y'*s.c/2 - sum(log.(diag(s.L))) - n*log(2π)/2
 end
 
 
@@ -906,21 +924,26 @@ function ∇log_likelihood_v(s :: RBFsurrogate)
     ∇L
 end
 
-# Surrogate isn't necessary here. Just need X, theta, and y.
-function optimize_hypers_optim(s::RBFsurrogate, ψconstructor; σn2=1e-6)    
-    # θ contains kernel variance and lengthscale parameters [σf, l]
+"""
+This only optimizes for lengthscale hyperparameter where the lengthscale is the
+same in each respective dimension.
+"""
+function optimize_hypers_optim(s::RBFsurrogate, ψconstructor; max_iterations=100)
     function f(θ)
-        ψ = kernel_scale(ψconstructor, θ)
-        lsur = fit_surrogate(ψ, s.X, s.y; σn2=σn2)
+        ψ = ψconstructor(θ)
+        lsur = fit_surrogate(ψ, s.X, s.y; σn2=s.σn2)
         return -log_likelihood(lsur)
     end
 
-    θinit = [1., s.ψ.θ[1]] # σf, l
-    lowerbounds = [1e-5, 1e-5]
-    upperbounds = [3., 3.]
-    res = optimize(f, lowerbounds, upperbounds, θinit)
+    θinit = s.ψ.θ
+    lowerbounds = [1e-1]
+    upperbounds = [10.]
+    res = optimize(f, lowerbounds, upperbounds, θinit, Fminbox(LBFGS()), Optim.Options(iterations=max_iterations))
+    lengthscale = Optim.minimizer(res)
+    kernel = ψconstructor(lengthscale)
+    opt_sur = fit_surrogate(kernel, s.X, get_observations(s); σn2=s.σn2)
 
-    return res
+    return opt_sur
 end
 
 function optimize_hypers(θ, kernel_constructor, X, f;

@@ -29,6 +29,7 @@ function tplot(f :: TestFunction)
     end
 end
 
+
 function TestBraninHoo(; a=1, b=5.1/(4π^2), c=5/π, r=6, s=10, t=1/(8π))
     function f(xy)
         x = xy[1]
@@ -47,11 +48,11 @@ function TestBraninHoo(; a=1, b=5.1/(4π^2), c=5/π, r=6, s=10, t=1/(8π))
     return TestFunction(2, bounds, xopt, f, ∇f)
 end
 
+
 function TestRosenbrock()
     f(xy) = (1-xy[1])^2 + 100*(xy[2]-xy[1]^2)^2
     ∇f(xy) = [-2*(1-xy[1]) - 400*xy[1]*(xy[2]-xy[1]^2), 200*(xy[2]-xy[1]^2)]
-    # return TestFunction(2, [-5.0 10.0 ; -5.0 10.0 ], ([1.0, 1.0],), f, ∇f)
-    return TestFunction(2, [-2.0 2.0 ; -1.0 3.0 ], ([1.0, 1.0],), f, ∇f)
+    return TestFunction(2, [-2.0 2.0 ; -1.0 3.0 ], (ones(2),), f, ∇f)
 end
 
 
@@ -91,7 +92,7 @@ function TestAckley(d; a=20.0, b=0.2, c=2π)
     bounds[:,2] .=  32.768
     xopt = (zeros(d),)
 
-    TestFunction(d, bounds, xopt, f, ∇f)
+    return TestFunction(d, bounds, xopt, f, ∇f)
 end
 
 
@@ -114,19 +115,9 @@ function TestSixHump()
     end
 
     # There's a symmetric optimum
-    xopt = ([0.0898, -0.7126], [-0.0898, 0.7126])
+    xopt = ([0.089842, -0.712656], [-0.089842, 0.712656])
 
-    TestFunction(2, [-3.0 3.0 ; -2.0 2.0], xopt, f, ∇f)
-end
-
-
-function TestBranin(; a=1.0, b=5.1/(4*π^2), c=5/π, r=6.0, s=10.0, t=1.0/(8π))
-    f(x) = a*(x[2]-b*x[1]^2+c*x[1]-r)^2 + s*(1-t)*cos(x[1]) + s
-    ∇f(x) = [2*a*(x[2]-b*x[1]^2+c*x[1]-r)*(-2*b*x[1]+c) - s*(1-t)*sin(x[1]),
-             2*a*(x[2]-b*x[1]^2+c*x[1]-r)]
-    bounds = [-5.0 10.0 ; 0.0 15.0]
-    xopt = ([-π, 12.275], [π, 2.275], [9.42478, 2.475])
-    TestFunction(2, bounds, xopt, f, ∇f)
+    return TestFunction(2, [-3.0 3.0 ; -2.0 2.0], xopt, f, ∇f)
 end
 
 
@@ -136,6 +127,47 @@ function TestGramacyLee()
     bounds = zeros(1, 2)
     bounds[1,1] = 0.5
     bounds[1,2] = 2.5
-    xopt=([0.548],)
-    TestFunction(1, bounds, xopt, f, ∇f)
+    xopt=([0.548563],)
+    return TestFunction(1, bounds, xopt, f, ∇f)
+end
+
+function TestEasom()
+    f(x) = -cos(x[1])*cos(x[2])*exp(-((x[1]-π)^2 + (x[2]-π)^2))
+
+    function ∇f(x)
+        function common_subexpression(x)
+            c = cos(x[1]) * cos(x[2])
+            e = exp(-((x[1] - π)^2 + (x[2] - π)^2))
+            term = 2 * (x[1] - π) * cos(x[2]) + 2 * (x[2] - π) * cos(x[1])
+            return c, e, term
+        end
+
+        c, e, term = common_subexpression(x)
+        
+        df1 = c * e * term - sin(x[1]) * cos(x[2]) * e
+        df2 = c * e * term - sin(x[2]) * cos(x[1]) * e
+        
+        return [df1, df2]
+    end
+
+    bounds = zeros(2, 2)
+    bounds[:, 1] = -100.0
+    bounds[:, 2] = 100.0
+    
+    xopt=([π, π],)
+
+    return TestFunction(2, bounds, xopt, f, ∇f)
+end
+
+
+# function TestMichalewicz(d; m=10.0)
+# end
+
+
+function ConstantTestFunction(n=0; lbs::Vector{<:T}, ubs::Vector{<:T}) where T <: Real
+    f(x) = n
+    ∇f(x) = zeros(length(x))
+    xopt = (zeros(length(lbs)),)
+    bounds = hcat(lbs, ubs)
+    return TestFunction(length(lbs), bounds, xopt, f, ∇f)
 end

@@ -30,7 +30,7 @@ function Trajectory(s::RBFsurrogate, x0::Vector{Float64}, h::Int)
 
     fsur = fit_fsurrogate(s, h)
     δsur = fit_δsurrogate(fsur, δX, ∇ys)
-    mfsur = fit_multioutput_fsurrogate(sur, h)
+    mfsur = fit_multioutput_fsurrogate(s, h)
 
     opt_HEI = zeros(d, d)
 
