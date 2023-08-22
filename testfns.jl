@@ -227,8 +227,8 @@ function TestEasom()
     end
 
     bounds = zeros(2, 2)
-    bounds[:, 1] = -100.0
-    bounds[:, 2] = 100.0
+    bounds[:, 1] .= -100.0
+    bounds[:, 2] .= 100.0
     
     xopt=([π, π],)
 
@@ -311,7 +311,7 @@ end
 
 
 function TestSchwefel(d)
-    f(x) = 418.9829 * d - sum(x .* sin(sqrt(abs(x))))
+    f(x) = 418.9829 * d - sum(x .* sin.(sqrt.(abs.(x))))
     ∇f(x) = zeros(d) # TODO
     bounds = zeros(d, 2)
     bounds[:,1] .= -500.0

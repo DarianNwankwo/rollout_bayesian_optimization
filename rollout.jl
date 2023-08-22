@@ -21,6 +21,7 @@ include("rbf_optim.jl")
 include("trajectory.jl")
 include("utils.jl")
 
+
 function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn2=1e-6, objective=:EI, num_starts=64,
     rnstream, xstarts)
     f0, ∇f0 = gp_draw(T.mfs, T.x0; stdnormal=rnstream[:,1])
@@ -56,7 +57,6 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn
         end
 
         # Update hessian if a new best is found on trajectory
-        # Should fi be fi + T.fs.ymean?
         if fi < T.fmin
             T.fmin = fi
             T.opt_HEI = sxi.HEI
@@ -71,6 +71,7 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn
     return nothing
 end
 
+
 function sample(T::Trajectory)
     @assert T.fs.fantasies_observed == T.h + 1 "Cannot sample from a trajectory that has not been rolled out"
     fantasy_slice = T.fs.known_observed + 1 : T.fs.known_observed + T.fs.fantasies_observed
@@ -84,6 +85,7 @@ function sample(T::Trajectory)
     ]
 end
 
+
 function best(T::Trajectory)
     # step[2] corresponds to the function value
     path = sample(T)
@@ -91,14 +93,17 @@ function best(T::Trajectory)
     return minndx, path[minndx]
 end
 
+
 function α(T::Trajectory)
     m = T.fs.known_observed - 1
     path = sample(T)
     fmini = minimum(get_observations(T.s))
     best_ndx, best_step = best(T)
     fb = best_step.y
+
     return max(fmini - fb, 0.)
 end
+
 
 function ∇α(T::Trajectory)
     if T.h == 0 return T.fs(T.x0).∇EI end
@@ -109,8 +114,7 @@ function ∇α(T::Trajectory)
     if fmini <= fb
         return zeros(length(xb))
     end
-    # Investigate the computations from the ground up and 
-    # see where the sign error might have been introduced
+
     return transpose(-∇fb'*T.opt_HEI)
 end
 
@@ -157,4 +161,8 @@ function simulate_trajectory(sur::RBFsurrogate; objective=:EI, x0, mc_iters, rns
     ∇μx = ∇αxi / mc_iters
 
     return μx + sx.EI, ∇μx
+end
+
+function simulate_trajectory(s::RBFsurrogate, tp::TrajectoryParameters)
+    
 end

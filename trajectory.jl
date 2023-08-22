@@ -37,6 +37,7 @@ function Trajectory(s::RBFsurrogate, x0::Vector{Float64}, h::Int)
     return Trajectory(s, fsur, δsur, mfsur, opt_HEI, fmin, x0, h)
 end
 
+
 function reset!(T::Trajectory)
     fmin = minimum(T.s.y) + T.s.ymean
     d, N = size(T.s.X)
@@ -46,4 +47,41 @@ function reset!(T::Trajectory)
     reset_mfsurrogate!(T.mfs, T.s)
 
     T.opt_HEI = zeros(d, d)
+end
+
+
+function check_dimensions(x0::Vector{Float64}, lbs::Vector{Float64}, ubs::Vector{Float64})
+    n = length(x0)
+    @assert length(lbs) == n && length(ubs) == n "Lower and upper bounds must be the same length as the initial point"
+end
+
+
+function check_stream_dimensions(rnstream::Array{Float64, 3}, d::Int, h::Int, mc_iters::Int)
+    n_rows, n_cols = size(rnstream[1, :, :])
+    @assert n_rows == d + 1 && n_cols <= h + 1 "Random number stream must have d + 1 rows and h + 1 columns for each sample"
+    @assert size(rnstream, 1) == mc_iters "Random number stream must have at least mc_iters ($mc_iters) samples"
+end
+
+
+Base.@kwdef struct TrajectoryParameters
+    x0::Vector{Float64}
+    h::Int
+    mc_iters::Int
+    rnstream::Array{Float64, 3}
+    lbs::Vector{Float64}
+    ubs::Vector{Float64}
+
+    function TrajectoryParameters(
+        x0::Vector{Float64},
+        h::Int,
+        mc_iters::Int,
+        rnstream::Array{Float64, 3},
+        lbs::Vector{Float64},
+        ubs::Vector{Float64}
+    )
+        check_dimensions(x0, lbs, ubs)
+        check_stream_dimensions(rnstream, length(x0), h, mc_iters)
+    
+        return new(x0, h, mc_iters, rnstream, lbs, ubs)
+    end
 end
