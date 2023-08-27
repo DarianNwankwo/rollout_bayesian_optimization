@@ -56,10 +56,10 @@ function check_dimensions(x0::Vector{Float64}, lbs::Vector{Float64}, ubs::Vector
 end
 
 
-function check_stream_dimensions(rnstream::Array{Float64, 3}, d::Int, h::Int, mc_iters::Int)
-    n_rows, n_cols = size(rnstream[1, :, :])
+function check_stream_dimensions(rnstream_sequence::Array{Float64, 3}, d::Int, h::Int, mc_iters::Int)
+    n_rows, n_cols = size(rnstream_sequence[1, :, :])
     @assert n_rows == d + 1 && n_cols <= h + 1 "Random number stream must have d + 1 rows and h + 1 columns for each sample"
-    @assert size(rnstream, 1) == mc_iters "Random number stream must have at least mc_iters ($mc_iters) samples"
+    @assert size(rnstream_sequence, 1) == mc_iters "Random number stream must have at least mc_iters ($mc_iters) samples"
 end
 
 
@@ -67,7 +67,7 @@ Base.@kwdef struct TrajectoryParameters
     x0::Vector{Float64}
     h::Int
     mc_iters::Int
-    rnstream::Array{Float64, 3}
+    rnstream_sequence::Array{Float64, 3}
     lbs::Vector{Float64}
     ubs::Vector{Float64}
 
@@ -75,13 +75,13 @@ Base.@kwdef struct TrajectoryParameters
         x0::Vector{Float64},
         h::Int,
         mc_iters::Int,
-        rnstream::Array{Float64, 3},
+        rnstream_sequence::Array{Float64, 3},
         lbs::Vector{Float64},
         ubs::Vector{Float64}
     )
         check_dimensions(x0, lbs, ubs)
-        check_stream_dimensions(rnstream, length(x0), h, mc_iters)
+        check_stream_dimensions(rnstream_sequence, length(x0), h, mc_iters)
     
-        return new(x0, h, mc_iters, rnstream, lbs, ubs)
+        return new(x0, h, mc_iters, rnstream_sequence, lbs, ubs)
     end
 end

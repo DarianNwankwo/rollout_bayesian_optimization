@@ -22,15 +22,16 @@ include("trajectory.jl")
 include("utils.jl")
 
 
-function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn2=1e-6, objective=:EI, num_starts=64,
-    rnstream, xstarts)
+function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
+    rnstream::Matrix{Float64}, xstarts::Matrix{Float64})
     f0, ∇f0 = gp_draw(T.mfs, T.x0; stdnormal=rnstream[:,1])
     f0, ∇f0 = f0 + T.fs.ymean, ∇f0 .+ T.mfs.∇ymean
 
     # Evaluate the surrogate at the initial location
     sx0 = T.fs(T.x0)
     # T.opt_HEI = sx0.HEI
-    δx0 = rand(length(T.x0))
+    # δx0 = -sx0.HEI \ T.δfs(sx0).∇EI
+    δx0 = zeros(length(T.x0))
 
     # Update surrogate, perturbed surrogate, and multioutput surrogate
     update_fsurrogate!(T.fs, T.x0, f0)
@@ -49,7 +50,7 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64}; σn
         fi, ∇fi = gp_draw(T.mfs, xnext; stdnormal=rnstream[:, j+1])
         fi, ∇fi = fi + T.fs.ymean, ∇fi .+ T.mfs.∇ymean
 
-        # Evaluate the surrogate at the initial location
+        # Evaluate the surrogate at the suggested location
         sxi = T.fs(xnext)
         δxi = zeros(length(xnext))
         if sxi.EI > 0
@@ -95,7 +96,6 @@ end
 
 
 function α(T::Trajectory)
-    m = T.fs.known_observed - 1
     path = sample(T)
     fmini = minimum(get_observations(T.s))
     best_ndx, best_step = best(T)
@@ -108,7 +108,7 @@ end
 function ∇α(T::Trajectory)
     if T.h == 0 return T.fs(T.x0).∇EI end
     m = T.fs.known_observed - 1
-    fmini = minimum(T.s.y) + T.s.ymean
+    fmini = minimum(get_observations(T.s))
     best_ndx, best_step = best(T)
     xb, fb, ∇fb = best_step
     if fmini <= fb
@@ -139,30 +139,28 @@ function visualize1D(T::Trajectory)
 end
 
 
-function simulate_trajectory(sur::RBFsurrogate; objective=:EI, x0, mc_iters, rnstream, lbs, ubs, h)
-    sx = sur(x0)
-    αxi, ∇αxi = 0., zeros(size(sur.X, 1))
+function simulate_trajectory(s::RBFsurrogate, tp::TrajectoryParameters, xstarts::Matrix{Float64})
+    αxs, ∇αxs = zeros(tp.mc_iters), zeros(length(tp.x0), tp.mc_iters)
+    deepcopy_s = Base.deepcopy(s)
 
-    for sample in 1:mc_iters
-        fsur = Base.deepcopy(sur)
-        fantasy_ndx = size(fsur.X, 2) + 1
-
+    for sample in 1:tp.mc_iters
         # Rollout trajectory
-        T = Trajectory(fsur, x0, fantasy_ndx; h=h, fopt=minimum(sur.y) + sur.ymean)
-        rollout!(T, lbs, ubs; rnstream=rnstream[sample,:,:], objective=objective)
-
+        T = Trajectory(deepcopy_s, tp.x0, tp.h)
+        rollout!(T, tp.lbs, tp.ubs;
+            rnstream=tp.rnstream_sequence[sample, :, :],
+            xstarts=xstarts
+        )
+        
         # Evaluate rolled out trajectory
-        αxi += α(T)
-        ∇αxi .+= ∇α(T)
+        αxs[sample] = α(T)
+        ∇αxs[:, sample] = ∇α(T)
     end
 
-    # Average trajectories MC simulation
-    μx = αxi / mc_iters
-    ∇μx = ∇αxi / mc_iters
+    # Average trajectories
+    μx = sum(αxs) / tp.mc_iters
+    ∇μx = sum(∇αxs, dims=2) / tp.mc_iters
+    stderr_μx = sqrt(sum((αxs .- μx) .^ 2) / (tp.mc_iters - 1))
+    stderr_∇μx = sqrt(sum((∇αxs .- ∇μx) .^ 2) / (tp.mc_iters - 1))
 
-    return μx + sx.EI, ∇μx
-end
-
-function simulate_trajectory(s::RBFsurrogate, tp::TrajectoryParameters)
-    
+    return μx, ∇μx, stderr_μx, stderr_∇μx
 end

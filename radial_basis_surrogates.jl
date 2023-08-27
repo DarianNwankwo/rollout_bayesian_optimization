@@ -28,7 +28,7 @@ function fit_surrogate(ψ::RBFfun, X::Matrix{Float64}, y::Vector{Float64}; σn2=
     K = eval_KXX(ψ, X, σn2=σn2)
     L = cholesky(Hermitian(K)).L
     ymean = mean(y)
-    y .-= ymean
+    y = y .- ymean
     c = L'\(L\y)
     return RBFsurrogate(ψ, X, K, L, y, c, σn2, ymean)
 end
@@ -259,7 +259,9 @@ function fit_fsurrogate(s::RBFsurrogate, h::Int64)
     X = zeros(d, N+h+1)
     slice = 1:N
     X[:, slice] = @view s.X[:,:] 
-    return FantasyRBFsurrogate(s.ψ, X, K, L, s.y, s.c, s.σn2, s.ymean, h, N, 0)
+    return FantasyRBFsurrogate(
+        deepcopy(s.ψ), X, K, L, deepcopy(s.y), deepcopy(s.c), deepcopy(s.σn2), deepcopy(s.ymean), h, N, 0
+    )
 end
 
 function reset_fsurrogate!(fs::FantasyRBFsurrogate, s::RBFsurrogate)
@@ -657,7 +659,7 @@ function fit_multioutput_fsurrogate(s::RBFsurrogate, h::Int64)
     fantasies_observed = 0
 
     return MultiOutputFantasyRBFsurrogate(
-        s.ψ, X, K, L, copy(s.y), ∇y, c, s.σn2, s.ymean,
+        deepcopy(s.ψ), X, K, L, deepcopy(s.y), ∇y, c, deepcopy(s.σn2), deepcopy(s.ymean),
         ∇ymean, h, known_observed, fantasies_observed
     )
 end

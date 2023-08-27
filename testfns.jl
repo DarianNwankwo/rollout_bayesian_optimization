@@ -462,10 +462,19 @@ function TestHartmann6D()
 end
 
 
-function ConstantTestFunction(n=0; lbs::Vector{<:T}, ubs::Vector{<:T}) where T <: Real
+function TestConstant(n=0; lbs::Vector{<:T}, ubs::Vector{<:T}) where T <: Real
     f(x) = n
     ∇f(x) = zeros(length(x))
     xopt = (zeros(length(lbs)),)
     bounds = hcat(lbs, ubs)
     return TestFunction(length(lbs), bounds, xopt, f, ∇f)
+end
+
+
+function TestQuadratic1D(a=1, b=0, c=0; lb=-1.0, ub=1.0)
+    f(x) = a*first(x)^2 + b*first(x) + c
+    ∇f(x) = 2*a*first(x) + b
+    bounds = [lb ub]
+    xopt = (zeros(1),)
+    return TestFunction(1, bounds, xopt, f, ∇f)
 end

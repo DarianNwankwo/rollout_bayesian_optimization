@@ -39,8 +39,8 @@ function nonmyopic_acquisition_plots()
     # Setup toy problem
     testfn = TestFunction(
         1, [0. 1.], [.5],
-        x -> 0. + σn2*randn(),
-        ∇x -> [0. + σn2*randn()]
+        x -> 0., # + σn2*randn(),
+        ∇x -> [0.] # + σn2*randn()]
     )
     lbs, ubs = testfn.bounds[:,1], testfn.bounds[:,2]
 
@@ -49,7 +49,7 @@ function nonmyopic_acquisition_plots()
     lds_rns = gen_low_discrepancy_sequence(MC_SAMPLES, testfn.dim, HORIZON+1)
     rns = randn(MC_SAMPLES, testfn.dim+1, HORIZON+1)
     
-    ϵ, num_starts = 1e-6, 64
+    ϵ, num_starts = 1e-6, 1
     s = SobolSeq(lbs, ubs)
     xstarts = reduce(hcat, next!(s) for i = 1:num_starts)
     xstarts = hcat(xstarts, lbs .+ ϵ)
@@ -59,7 +59,7 @@ function nonmyopic_acquisition_plots()
     N, θ = 1, [.25]
     X = [.15;; .85;;]
     y = [testfn.f(X[:,j]) for j in 1:size(X, 2)]
-    ψ = kernel_scale(kernel_matern52, [1., θ...])
+    ψ = kernel_scale(kernel_matern52, [5., θ...])
     sur = fit_surrogate(ψ, X, y; σn2=σn2)
 
     domain = filter(x -> !(x in X), lbs[1]:.01:ubs[1])
@@ -73,43 +73,24 @@ function nonmyopic_acquisition_plots()
         println("Total '|'s => $(length(domain))")
         # Iterate over each input location
         for x0 in domain
-        # for x0 in [.5]
             print("|$x0")
             # Grab each input location and convert to a column vector
             x0 = [x0]
-    
-            αxs, ∇αxs = [], []
+
+            tp = TrajectoryParameters(
+                x0=x0, h=HORIZON, mc_iters=MC_SAMPLES,
+                rnstream_sequence=random_number_stream, lbs=lbs, ubs=ubs
+            )
             # Monte-carlo integrate trajectory for x0
-            for sample in 1:MC_SAMPLES
-                # Make a copy of our surrogate to pass to the trajectory struct
-                # for fantasized computations
-                fsur = Base.deepcopy(sur)
-                fantasy_ndx = size(fsur.X, 2) + 1
-    
-                # Rollout trajectory
-                T = Trajectory(fsur, x0, HORIZON)
-                rollout!(T, lbs, ubs;
-                    rnstream=random_number_stream[sample,:,:],
-                    xstarts=xstarts    
-                )
-    
-                # Evaluate rolled out trajectory
-                push!(αxs, α(T))
-                push!(∇αxs, first(∇α(T)))
-            end # endfor sample
-    
-            # Average trajectories
-            μx = sum(αxs) / MC_SAMPLES
-            ∇μx = sum(∇αxs) / MC_SAMPLES
-            σx = sum((αxs .- μx) .^ 2) / (MC_SAMPLES-1)
-            ∇σx = sum((∇αxs .- ∇μx) .^ 2) / (MC_SAMPLES-1)
-    
+            μx, ∇μx, σx, ∇σx = simulate_trajectory(sur, tp, xstarts)
+            ∇μx = first(∇μx)
+   
             # Update history
             if ndx == 1
                 # Add control variates to QMC estimates
                 sx = sur(x0)
                 μx += ei(sx.μ, sx.σ, minimum(sur.y)) # + poi(sx.μ, sx.σ, minimum(sur.y))
-                ∇μx += first(sx.∇EI)
+                # ∇μx += first(sx.∇EI)
             end
             rollout_ei = vcat(rollout_ei, [μx σx])
             ∇rollout_ei = vcat(∇rollout_ei, [∇μx ∇σx])
@@ -155,13 +136,13 @@ function nonmyopic_acquisition_plots()
         label="MC EI(h=$HORIZON)±σ", linestyle=:dash#, ylims=∇ylims
     )
     # vline!(X)
-    savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES).png")
+    savefig("$(dir_name)/rollout_nabla_ei_h$(HORIZON)_mc$(MC_SAMPLES).png")
     
     plot(plot_domain, ∇eis[1][:, 1], ribbons=sqrt.(∇eis[1][:, 2]) / sqrt(MC_SAMPLES), margin=10mm,
         label="QMC EI(h=$HORIZON)±σ", linestyle=:dash#, ylims=∇ylims_lds
     )
     # vline!(X)
-    savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_qmc$(MC_SAMPLES).png")
+    savefig("$(dir_name)/rollout_nabla_ei_h$(HORIZON)_qmc$(MC_SAMPLES).png")
     
     plot(plot_domain, ∇eis[2][:, 1], ribbons=sqrt.(∇eis[2][:, 2]) / sqrt(MC_SAMPLES), margin=10mm,
         label="MC EI(h=$HORIZON)±σ", linestyle=:dash#, ylims=∇ylims
@@ -170,7 +151,7 @@ function nonmyopic_acquisition_plots()
         label="QMC EI(h=$HORIZON)±σ", linestyle=:dash
     )
     # vline!(X)
-    savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES)_stacked.png")
+    savefig("$(dir_name)/rollout_nabla_ei_h$(HORIZON)_mc$(MC_SAMPLES)_stacked.png")
     
     #######################################################
     ## Save all the same plots without the error ribbons ##
@@ -204,13 +185,13 @@ function nonmyopic_acquisition_plots()
         label="MC EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims
     )
     # vline!(X)
-    savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES)_no_ribbons.png")
+    savefig("$(dir_name)/rollout_nabla_ei_h$(HORIZON)_mc$(MC_SAMPLES)_no_ribbons.png")
     
     plot(plot_domain, ∇eis[1][:, 1], margin=10mm,
         label="QMC EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims_lds
     )
     # vline!(X)
-    savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_qmc$(MC_SAMPLES)_no_ribbons.png")
+    savefig("$(dir_name)/rollout_nabla_ei_h$(HORIZON)_qmc$(MC_SAMPLES)_no_ribbons.png")
     
     plot(plot_domain, ∇eis[2][:, 1], margin=10mm,
         label="MC EI(h=$HORIZON)", linestyle=:dash#, ylims=∇ylims
@@ -219,7 +200,7 @@ function nonmyopic_acquisition_plots()
         label="QMC EI(h=$HORIZON)", linestyle=:dash
     )
     # vline!(X)
-    savefig("$(dir_name)/rollout_∇ei_h$(HORIZON)_mc$(MC_SAMPLES)_stacked_no_ribbons.png")
+    savefig("$(dir_name)/rollout_nabla_ei_h$(HORIZON)_mc$(MC_SAMPLES)_stacked_no_ribbons.png")
 end
 
 
