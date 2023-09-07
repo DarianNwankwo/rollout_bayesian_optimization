@@ -626,7 +626,7 @@ function eval_mixed_KxX(ms::MultiOutputFantasyRBFsurrogate, x::Vector{Float64})
         first_row = vcat(first_row, -eval_∇KxX(ms.ψ, x, ms.X[:, M:M]))
         # 3. Compute covariance of gradient observation against gradient observations
         remainder_rows = hcat(remainder_rows, -eval_Hk(ms.ψ, x - ms.X[:, M:M]))
-        # remainder_rows = hcat(remainder_rows, eval_Hk(ms.ψ, x - ms.X[:, M:M]))
+        # remainder_rows = hcat(remainder_rows, -eval_Hk(ms.ψ, ms.X[:, M:M] - x))
     end
 
     KxX = [first_row'; remainder_rows]
@@ -688,7 +688,9 @@ end
 function update_multioutput_fsurrogate!(s::MultiOutputFantasyRBFsurrogate, xnew::Vector{Float64},
     ynew::Float64, ∇ynew::Vector{Float64})
     @assert s.fantasies_observed < s.h + 1 "Cannot add more fantasies than the number of fantasies specified in the surrogate"
-    if s.fantasies_observed == 0 s.∇ymean = ∇ynew end
+    if s.fantasies_observed == 0
+        s.∇ymean = ∇ynew
+    end
 
     update_ndx = s.known_observed + s.fantasies_observed + 1
     d, N = size(s.X, 1), s.known_observed + s.fantasies_observed
@@ -820,14 +822,15 @@ function eval(ms::MultiOutputFantasyRBFsurrogate, x::Vector{Float64}, ymin::Real
 end
 
 function eval(s::MultiOutputFantasyRBFsurrogate, x::Vector{Float64})
-    y = s.y[1:s.known_observed]
+    # Should this be minimum of get_observations?
+    y = s.y[1:s.known_observed] .+ s.ymean
     return eval(s, x, minimum(y))
 end
 (s::MultiOutputFantasyRBFsurrogate)(x::Vector{Float64}) = eval(s, x)
 
-function gp_draw(s::MultiOutputFantasyRBFsurrogate, x::Vector{Float64}; stdnormal::Vector{Float64})
-    sx = s(x)
-    f_and_∇f =  sx.μ + sx.σ .* stdnormal
+function gp_draw(mofs::MultiOutputFantasyRBFsurrogate, x::Vector{Float64}; stdnormal::Vector{Float64})
+    mofsx = mofs(x)
+    f_and_∇f =  mofsx.μ + mofsx.σ .* stdnormal
     f, ∇f = f_and_∇f[1], f_and_∇f[2:end]
     return f, ∇f
 end
@@ -855,12 +858,12 @@ Given a multi-output GP surrogate and a point x, draw a sample from the
 posterior distribution of the function value and its gradient at x.
 """
 
-function gp_draw(ms::MultiOutputFantasyRBFsurrogate, xloc; stdnormal)
-    msx = ms(xloc)
-    sample = msx.μ + msx.σ*stdnormal
-    f, ∇f = sample[1], sample[2:end]
-    return f, ∇f
-end
+# function gp_draw(ms::MultiOutputFantasyRBFsurrogate, xloc; stdnormal)
+#     msx = ms(xloc)
+#     sample = msx.μ + msx.σ .* stdnormal
+#     f, ∇f = sample[1], sample[2:end]
+#     return f, ∇f
+# end
 
 function get_observations(s::Union{RBFsurrogate, FantasyRBFsurrogate, MultiOutputFantasyRBFsurrogate})
     return s.y .+ s.ymean

@@ -49,7 +49,7 @@ function nonmyopic_acquisition_plots()
     lds_rns = gen_low_discrepancy_sequence(MC_SAMPLES, testfn.dim, HORIZON+1)
     rns = randn(MC_SAMPLES, testfn.dim+1, HORIZON+1)
     
-    ϵ, num_starts = 1e-6, 1
+    ϵ, num_starts = 1e-6, 4
     s = SobolSeq(lbs, ubs)
     xstarts = reduce(hcat, next!(s) for i = 1:num_starts)
     xstarts = hcat(xstarts, lbs .+ ϵ)
@@ -89,7 +89,7 @@ function nonmyopic_acquisition_plots()
             if ndx == 1
                 # Add control variates to QMC estimates
                 sx = sur(x0)
-                μx += ei(sx.μ, sx.σ, minimum(sur.y)) # + poi(sx.μ, sx.σ, minimum(sur.y))
+                μx += sx.EI
                 # ∇μx += first(sx.∇EI)
             end
             rollout_ei = vcat(rollout_ei, [μx σx])

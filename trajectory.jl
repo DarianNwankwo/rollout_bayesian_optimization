@@ -32,7 +32,7 @@ function Trajectory(s::RBFsurrogate, x0::Vector{Float64}, h::Int)
     δsur = fit_δsurrogate(fsur, δX, ∇ys)
     mfsur = fit_multioutput_fsurrogate(s, h)
 
-    opt_HEI = zeros(d, d)
+    opt_HEI = Matrix{Float64}(I(d))
 
     return Trajectory(s, fsur, δsur, mfsur, opt_HEI, fmin, x0, h)
 end
@@ -63,7 +63,7 @@ function check_stream_dimensions(rnstream_sequence::Array{Float64, 3}, d::Int, h
 end
 
 
-Base.@kwdef struct TrajectoryParameters
+Base.@kwdef mutable struct TrajectoryParameters
     x0::Vector{Float64}
     h::Int
     mc_iters::Int
