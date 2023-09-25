@@ -95,7 +95,7 @@ function plot1D(s::RBFsurrogate; xmin=-1, xmax=1, npts=100)
         σ[i] = sx.σ
     end
 
-    p = plot(x, μ, ribbons=2σ, label="μ±2σ (Ground Truth)")
+    p = plot(x, μ, ribbons=2σ, label="μ±2σ (Ground Truth)", grid=false)
     scatter!(s.X[1,:], get_observations(s), label="Observations")
     return p
 end
@@ -220,7 +220,7 @@ function eval(s::RBFsurrogate, x::Vector{Float64}, ymin::Real)
     return sx
 end
 
-eval(s::RBFsurrogate, x::Vector{Float64}) = eval(s, x, minimum(s.y) + s.ymean)
+eval(s::RBFsurrogate, x::Vector{Float64}) = eval(s, x, minimum(get_observations(s)))
 (s::RBFsurrogate)(x::Vector{Float64}) = eval(s, x)
 
 function gp_draw(s::RBFsurrogate, xloc; stdnormal)
@@ -539,7 +539,7 @@ function update_δsurrogate!(δs::δRBFsurrogate, ufs::FantasyRBFsurrogate, δx:
     δs.K[update_ndx, update_ndx] = δKxx
 
     slice = 1:update_ndx
-    δs.K[slice, slice]*ufs.c
+    # δs.K[slice, slice]*ufs.c
     # Print the size of of the left hand side of the linear solve and the right hand side using
     # string interpolation
     δs.c = ufs.L[slice, slice]\(δs.y - δs.K[slice, slice]*ufs.c)

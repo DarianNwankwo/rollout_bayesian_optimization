@@ -20,6 +20,12 @@ include("radial_basis_functions.jl")
 include("rbf_optim.jl")
 include("trajectory.jl")
 include("utils.jl")
+include("testfns.jl")
+
+
+function not_near(x::Vector{Float64}, X::Matrix{Float64}; tol::Float64=1e-6)
+    return all([norm(x - X[:, i]) > tol for i in 1:size(X, 2)])
+end
 
 """
 I THINK MY COVARIANCE MEASURES FOR GRADIENTS IS WRONG
@@ -42,27 +48,17 @@ of the underlying function that is not accurate.
 """
 function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
     rnstream::Matrix{Float64}, xstarts::Matrix{Float64})
-    # if first(T.x0) in T.s.X
-    #     mfsx = T.mfs(T.x0)
-    #     println("\nParams to GP Draw (μ=$(mfsx.μ), σ=$(mfsx.σ), randn=$(rnstream[:,1]))")
-    # end
+    # Initial draw at predetermined location not chosen by policy
     f0, ∇f0 = gp_draw(T.mfs, T.x0; stdnormal=rnstream[:,1])
-    # if first(T.x0) in T.s.X
-    #     println(
-    #         "x: $(T.x0), f0: $(f0), ∇f0: $(∇f0), mfs.ymean=$(T.mfs.ymean), mfs.∇ymean=$(T.mfs.∇ymean), fs.ymean=$(T.fs.ymean)"
-    #     )
-    # end
 
     # Evaluate the surrogate at the initial location
     sx0 = T.fs(T.x0)
     δx0 = rand(length(T.x0))
 
     # Update surrogate, perturbed surrogate, and multioutput surrogate
-    update_fsurrogate!(T.fs, T.x0, f0)
-    update_δsurrogate!(T.δfs, T.fs, δx0, ∇f0)
-    update_multioutput_fsurrogate!(T.mfs, T.x0, f0, ∇f0)
+    update_trajectory!(T, T.x0, δx0, f0, ∇f0)
 
-    # Setup up evaluation locations for newton solves
+    # Preallocate for newton solves
     xnext = zeros(length(T.x0))
 
     # Perform rollout for fantasized trajectories
@@ -72,38 +68,31 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
 
         # Draw fantasized sample at proposed location after base acquisition solve
         fi, ∇fi = gp_draw(T.mfs, xnext; stdnormal=rnstream[:, j+1])
-        # if first(T.x0) in T.s.X
-        #     println("x: $xnext, f$j: $(fi), ∇f$j: $(∇fi), mfs.ymean=$(T.mfs.ymean), mfs.∇ymean=$(T.mfs.∇ymean), fs.ymean=$(T.fs.ymean)")
-        # end
 
         # Evaluate the surrogate at the suggested location
         sxi = T.fs(xnext)
         δxi = zeros(length(xnext))
         if sxi.EI > 0
             δxi = -sxi.HEI \ T.δfs(sxi).∇EI
-        end
-
-        # Update hessian if a new best is found on trajectory
-        if fi < T.fmin
-            T.fmin = fi
-            T.opt_HEI = sxi.HEI
+            # Update hessian if a new best is found on trajectory
+            trajectory_start = T.mfs.known_observed + 1
+            if fi < T.fmin && not_near(xnext, T.mfs.X[:, trajectory_start:end])
+                T.fmin = fi
+                T.opt_HEI = sxi.HEI
+            end
         end
        
         # Update surrogate, perturbed surrogate, and multioutput surrogate
-        update_fsurrogate!(T.fs, xnext, fi)
-        update_δsurrogate!(T.δfs, T.fs, δxi, ∇fi)
-        update_multioutput_fsurrogate!(T.mfs, xnext, fi,  ∇fi)
+        update_trajectory!(T, xnext, δxi, fi,  ∇fi)
     end
-    # if first(T.x0) in T.s.X
-    #     println("ymean=$(T.mfs.ymean), ∇ymean=$(T.mfs.∇ymean)")
-    #     println("T.mfs.y: $(get_observations(T.mfs)), T.mfs.∇y: $(get_grad_observations(T.mfs))\n")
-    # end
 
     return nothing
 end
 
+
+
 function rollout_deterministic!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
-    rnstream::Matrix{Float64}, xstarts::Matrix{Float64}, testfn::TestFunction)
+    xstarts::Matrix{Float64}, testfn::TestFunction)
     f0, ∇f0 = testfn.f(T.x0), testfn.∇f(T.x0)
 
     # Evaluate the surrogate at the initial location
@@ -111,9 +100,7 @@ function rollout_deterministic!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector
     δx0 = rand(length(T.x0))
 
     # Update surrogate, perturbed surrogate, and multioutput surrogate
-    update_fsurrogate!(T.fs, T.x0, f0)
-    update_δsurrogate!(T.δfs, T.fs, δx0, ∇f0)
-    update_multioutput_fsurrogate!(T.mfs, T.x0, f0, ∇f0)
+    update_trajectory!(T, T.x0, δx0, f0, ∇f0)
 
     # Setup up evaluation locations for newton solves
     xnext = zeros(length(T.x0))
@@ -129,6 +116,7 @@ function rollout_deterministic!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector
         # Evaluate the surrogate at the suggested location
         sxi = T.fs(xnext)
         δxi = zeros(length(xnext))
+
         if sxi.EI > 0
             δxi = -sxi.HEI \ T.δfs(sxi).∇EI
         end
@@ -140,9 +128,7 @@ function rollout_deterministic!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector
         end
        
         # Update surrogate, perturbed surrogate, and multioutput surrogate
-        update_fsurrogate!(T.fs, xnext, fi)
-        update_δsurrogate!(T.δfs, T.fs, δxi, ∇fi)
-        update_multioutput_fsurrogate!(T.mfs, xnext, fi,  ∇fi)
+        update_trajectory!(T, xnext, δxi, fi,  ∇fi)
     end
 
     return nothing
@@ -191,15 +177,28 @@ function ∇α(T::Trajectory)
     return transpose(-∇fb'*T.opt_HEI)
 end
 
+function ∇αd(T::Trajectory)
+    fmini = minimum(get_observations(T.s))
+    best_ndx, best_step = best(T)
+    xb, fb, ∇fb = best_step
+    if fmini <= fb
+        return zeros(length(xb))
+    end
+
+    return transpose(-∇fb'*T.opt_HEI)
+end
+
 
 function visualize1D(T::Trajectory)
+    known_observed = T.fs.known_observed
+    xfs = T.mfs.X[:, known_observed+1:end]
     p = plot(
-        0:T.h, T.xfs[1, :], color=:red, label=nothing, xlabel="Decision Epochs (h=$(T.h))",
+        0:T.h, xfs[1, :], color=:red, label=nothing, xlabel="Decision Epochs (h=$(T.h))",
         ylabel="Control Space (xʳ)", title="Trajectory Visualization in 1D",
-        xticks=(0:T.h, ["x$(i)" for i in 0:T.h]), xrotation=45, grid=false
+        xticks=(0:T.h, ["Step $(i)" for i in 0:T.h]), xrotation=45, grid=false
     )
     vline!(0:T.h, color=:black, linestyle=:dash, linewidth=1, label=nothing, alpha=.2)
-    scatter!(0:T.h, T.xfs[1, :], color=:red, label=nothing)
+    scatter!(0:T.h, xfs[1, :], color=:red, label=nothing)
     # lbs, ubs not defined
     yticks!(
         round.(range(lbs[1], ubs[1], length=11), digits=1)
@@ -255,29 +254,13 @@ function simulate_trajectory_deterministic(
     xstarts::Matrix{Float64};
     testfn::TestFunction,
     )
-    αxs, ∇αxs = zeros(tp.mc_iters), zeros(length(tp.x0), tp.mc_iters)
     deepcopy_s = Base.deepcopy(s)
-    Ts = []
 
-    for sample_ndx in 1:tp.mc_iters
-        # Rollout trajectory
-        T = Trajectory(deepcopy_s, tp.x0, tp.h)
-        rollout_deterministic!(T, tp.lbs, tp.ubs;
-            rnstream=tp.rnstream_sequence[sample_ndx, :, :],
-            xstarts=xstarts, testfn=testfn
-        )
-        push!(Ts, T)
-        
-        # Evaluate rolled out trajectory
-        αxs[sample_ndx] = α(T)
-        ∇αxs[:, sample_ndx] = ∇α(T)
-    end
+    # Rollout trajectory
+    T = Trajectory(deepcopy_s, tp.x0, tp.h)
+    rollout_deterministic!(T, tp.lbs, tp.ubs;
+        xstarts=xstarts, testfn=testfn
+    )
 
-    # Average trajectories
-    μx = sum(αxs) / tp.mc_iters
-    ∇μx = vec(sum(∇αxs, dims=2) / tp.mc_iters)
-    stderr_μx = sqrt(sum((αxs .- μx) .^ 2) / (tp.mc_iters - 1))
-    stderr_∇μx = sqrt(sum((∇αxs .- ∇μx) .^ 2) / (tp.mc_iters - 1))
-
-    return μx, ∇μx, stderr_μx, stderr_∇μx, Ts
+    return α(T), ∇αd(T)
 end

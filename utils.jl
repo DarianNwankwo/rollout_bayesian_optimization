@@ -144,6 +144,20 @@ function inbounds(x0, lbs, ubs)
     return all(lbs .< x0 .< ubs)
 end
 
+
+function find_zeros(vector::Vector{Float64})
+    indices = Int[]
+    
+    for i in 2:length(vector)
+        if (vector[i - 1] > 0 && vector[i] <= 0) || (vector[i - 1] <= 0 && vector[i] > 0)
+            push!(indices, i)
+        end
+    end
+    
+    return indices
+end
+
+
 """
 Generate a batch of N points inbounds relative to the lowerbounds and
 upperbounds

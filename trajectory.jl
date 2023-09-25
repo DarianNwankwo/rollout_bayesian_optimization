@@ -38,6 +38,21 @@ function Trajectory(s::RBFsurrogate, x0::Vector{Float64}, h::Int)
 end
 
 
+function update_trajectory!(
+    T::Trajectory,
+    x::Vector{Float64},
+    δx::Vector{Float64},
+    f::Float64,
+    ∇f::Vector{Float64})
+    # Update surrogate, perturbed surrogate, and multioutput surrogate
+    update_fsurrogate!(T.fs, x, f)
+    update_δsurrogate!(T.δfs, T.fs, δx, ∇f)
+    update_multioutput_fsurrogate!(T.mfs, x, f,  ∇f)
+
+    return nothing
+end
+
+
 function reset!(T::Trajectory)
     fmin = minimum(T.s.y) + T.s.ymean
     d, N = size(T.s.X)

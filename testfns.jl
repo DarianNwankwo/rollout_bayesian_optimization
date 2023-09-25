@@ -10,7 +10,35 @@ struct TestFunction
 end
 
 
-(f :: TestFunction)(x) = f.f(x)
+(testfn::TestFunction)(x::Vector{Float64}) = testfn.f(x)
+function (testfn::TestFunction)(X::AbstractMatrix; grad=false)
+    return map(
+        !grad ? testfn.f : testfn.∇f,
+        eachcol(X)
+    )
+end
+
+
+function apply_scale(testfn::TestFunction, s::Number)
+    function f(x)
+        return testfn.f(x/s)
+    end
+    function ∇f(x)
+        return testfn.∇f(x/s) / s
+    end
+    return TestFunction(testfn.dim, testfn.bounds*s, testfn.xopt .* s, f, ∇f)
+end
+
+
+function apply_shift(testfn::TestFunction, s::Number)
+    function f(x)
+        return testfn.f(x) + s
+    end
+    function ∇f(x)
+        return testfn.∇f(x)
+    end
+    return TestFunction(testfn.dim, testfn.bounds, testfn.xopt, f, ∇f)
+end
 
 
 function tplot(f :: TestFunction)
