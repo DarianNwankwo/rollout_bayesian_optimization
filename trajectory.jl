@@ -1,15 +1,44 @@
 include("radial_basis_surrogates.jl")
 
 
+# mutable struct Trajectory
+#     s::RBFsurrogate
+#     fs::Union{FantasyRBFsurrogate, Nothing}
+#     δfs::Union{δRBFsurrogate, Nothing}
+#     mfs::Union{MultiOutputFantasyRBFsurrogate, Nothing}
+#     opt_HEI::Union{Matrix{Float64}, Nothing}
+#     fmin::Union{Float64, Nothing}
+#     x0::Vector{Float64}
+#     h::Int
+# end
+
+# mutable struct ForwardTrajectory
 mutable struct Trajectory
     s::RBFsurrogate
     fs::Union{FantasyRBFsurrogate, Nothing}
-    δfs::Union{δRBFsurrogate, Nothing}
     mfs::Union{MultiOutputFantasyRBFsurrogate, Nothing}
-    opt_HEI::Union{Matrix{Float64}, Nothing}
+    jacobians::Vector{Matrix{Float64}}
     fmin::Union{Float64, Nothing}
     x0::Vector{Float64}
     h::Int
+end
+
+
+# function ForwardTrajectory(s::RBFsurrogate, x0::Vector{Float64}, h::Int)
+function Trajectory(s::RBFsurrogate, x0::Vector{Float64}, h::Int)
+    fmin = minimum(get_observations(s))
+    d, N = size(s.X)
+
+    ∇ys = [zeros(d) for i in 1:N]
+
+    fsur = fit_fsurrogate(s, h)
+    mfsur = fit_multioutput_fsurrogate(s, h)
+
+    # jacobians = [1e-6 * I(d)]
+    jacobians = [I(d)]
+
+    # return ForwardTrajectory(s, fsur, mfsur, jacobians, fmin, x0, h)
+    return Trajectory(s, fsur, mfsur, jacobians, fmin, x0, h)
 end
 
 """
@@ -19,23 +48,23 @@ in the surrogate at the initial point.
 - TODO: Fix the logic associated with maintaining the minimum found along the sample path vs.
 that of the minimum from the best value known from the known locations.
 """
-function Trajectory(s::RBFsurrogate, x0::Vector{Float64}, h::Int)
-    # The ground truth surrogate is zero mean, so when we sample from our GP, we
-    # need to add the mean back in when we are updating the surrogate.
-    fmin = minimum(s.y) + s.ymean
-    d, N = size(s.X)
+# function Trajectory(s::RBFsurrogate, x0::Vector{Float64}, h::Int)
+#     # The ground truth surrogate is zero mean, so when we sample from our GP, we
+#     # need to add the mean back in when we are updating the surrogate.
+#     fmin = minimum(s.y) + s.ymean
+#     d, N = size(s.X)
 
-    ∇ys = [zeros(d) for i in 1:N]
-    δX = zeros(d, N)
+#     ∇ys = [zeros(d) for i in 1:N]
+#     δX = zeros(d, N)
 
-    fsur = fit_fsurrogate(s, h)
-    δsur = fit_δsurrogate(fsur, δX, ∇ys)
-    mfsur = fit_multioutput_fsurrogate(s, h)
+#     fsur = fit_fsurrogate(s, h)
+#     δsur = fit_δsurrogate(fsur, δX, ∇ys)
+#     mfsur = fit_multioutput_fsurrogate(s, h)
 
-    opt_HEI = Matrix{Float64}(I(d))
+#     opt_HEI = Matrix{Float64}(I(d))
 
-    return Trajectory(s, fsur, δsur, mfsur, opt_HEI, fmin, x0, h)
-end
+#     return Trajectory(s, fsur, δsur, mfsur, opt_HEI, fmin, x0, h)
+# end
 
 
 function update_trajectory!(

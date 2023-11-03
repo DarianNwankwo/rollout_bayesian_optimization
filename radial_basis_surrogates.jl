@@ -484,7 +484,7 @@ mutable struct δRBFsurrogate
 end
 
 function fit_δsurrogate(fs::FantasyRBFsurrogate, δX::Matrix{Float64}, ∇ys::Vector{Vector{Float64}})
-    slice = 1:fs.known_observed # fs.known_observed == N
+    slice = 1:fs.known_observed + fs.fantasies_observed # fs.known_observed == N
     d, N = size(fs.X[:, slice])
     δK = zeros(N+fs.h+1, N+fs.h+1)
     δK[1:N, 1:N] = eval_δKXX(fs.ψ, fs.X[:, slice], δX)
