@@ -6,11 +6,12 @@ using Sobol
 using Random
 using CSV
 using DataFrames
+using Dates
 
 
 include("../testfns.jl")
-include("../utils.jl")
 include("../rollout.jl")
+include("../utils.jl")
 
 
 function parse_command_line(args)
@@ -52,6 +53,11 @@ function parse_command_line(args)
             action = :store_arg
             help = "Horizon for the rollout (default: 1)"
             default = 1
+            arg_type = Int
+        "--batch-size"
+            action = :store_arg
+            help = "Batch size for the rollout (default: 1)"
+            default = 8
             arg_type = Int
     end
 
@@ -195,16 +201,54 @@ function generate_initial_guesses(N::Int, lbs::Vector{T}, ubs::Vector{T},) where
 end
 
 
+function rollout_solver(;
+    sur::RBFsurrogate,
+    tp::TrajectoryParameters,
+    xstarts::Matrix{Float64},
+    batch::Matrix{Float64},
+    max_iterations::Int = 100,
+    varred::Bool = true,
+    )
+    batch_results = Array{Any, 1}(undef, size(batch, 2))
+
+    for i in 1:size(batch, 2)
+        # Update start of trajectory for each point in the batch
+        tp.x0 = batch[:, i]
+
+        # Perform stochastic gradient ascent on the point in the batch
+        batch_results[i] = stochastic_gradient_ascent_adam(
+            sur=sur,
+            tp=tp,
+            max_sgd_iters=max_iterations,
+            varred=varred,
+            xstarts=xstarts,
+        )
+    end
+
+    # Find the point in the batch that maximizes the rollout acquisition function
+    best_tuple = first(batch_results)
+    for result in batch_results[2:end]
+        if result.final_obj > best_tuple.final_obj
+            best_tuple = result
+        end
+    end
+
+    return best_tuple.finish, best_tuple.final_obj
+end
+
+
 function main()
     cli_args = parse_command_line(ARGS)
     Random.seed!(2024)
     BUDGET = cli_args["budget"]
     NUMBER_OF_TRIALS = cli_args["trials"]
     NUMBER_OF_STARTS = cli_args["starts"]
+    # Create a string of the current time to use as a directory name
     DATA_DIRECTORY = cli_args["output-dir"]
     SHOULD_OPTIMIZE = if haskey(cli_args, "optimize") cli_args["optimize"] else false end
     MC_SAMPLES = cli_args["mc-samples"]
     HORIZON = cli_args["horizon"]
+    BATCH_SIZE = cli_args["batch-size"]
 
     # Establish the synthetic functions we want to evaluate our algorithms on.
     testfn_payloads = Dict(
@@ -258,6 +302,9 @@ function main()
     testfn = payload.fn(payload.args...)
     lbs, ubs = testfn.bounds[:,1], testfn.bounds[:,2]
 
+    # Generate low discrepancy sequence
+    lds_rns = gen_low_discrepancy_sequence(MC_SAMPLES, testfn.dim, HORIZON + 1)
+
     # Allocate initial guesses for optimizer
     initial_guesses = generate_initial_guesses(NUMBER_OF_STARTS, lbs, ubs)
 
@@ -275,6 +322,19 @@ function main()
         DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_observations.csv", BUDGET
     )
 
+    # Initialize the trajectory parameters
+    tp = TrajectoryParameters(
+        initial_samples[:, 1], # Will be overriden later
+        HORIZON,
+        MC_SAMPLES,
+        lds_rns,
+        lbs,
+        ubs,
+    )
+
+    # Initialize batch of points to evaluate the rollout acquisition function
+    batch = generate_batch(BATCH_SIZE, lbs=tp.lbs, ubs=tp.ubs)
+
     for trial in 1:NUMBER_OF_TRIALS
         println("($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS)...")
         # Initialize surrogate model
@@ -286,7 +346,7 @@ function main()
         print("Budget Counter: ")
         for budget in 1:BUDGET
             # Solve the acquisition function
-            xbest, fbest = rollout_solver(sur, lbs, ubs; initial_guesses=initial_guesses)
+            xbest, fbest = rollout_solver(sur=sur, tp=tp, xstarts=initial_guesses, batch=batch)
             ybest = testfn.f(xbest)
             # Update the surrogate model
             sur = update_surrogate(sur, xbest, ybest)
@@ -300,19 +360,13 @@ function main()
 
         # Compute the GAP of the surrogate model
         fbest = testfn.f(testfn.xopt[1])
-        ei_gaps[:] .= measure_gap(get_observations(sur_ei), fbest)
-        ucb_gaps[:] .= measure_gap(get_observations(sur_ucb), fbest)
-        poi_gaps[:] .= measure_gap(get_observations(sur_poi), fbest)
+        rollout_gaps[:] .= measure_gap(get_observations(sur), fbest)
 
         # Write the GAP to disk
-        write_gap_to_csv(ei_gaps, trial, ei_csv_file_path)
-        write_gap_to_csv(ucb_gaps, trial, ucb_csv_file_path)
-        write_gap_to_csv(poi_gaps, trial, poi_csv_file_path)
+        write_gap_to_csv(rollout_gaps, trial, rollout_csv_file_path)
 
         # Write the surrogate observations to disk
-        write_observations_to_csv(sur_ei.X, get_observations(sur_ei), trial, ei_observation_csv_file_path)
-        write_observations_to_csv(sur_ucb.X, get_observations(sur_ucb), trial, ucb_observation_csv_file_path)
-        write_observations_to_csv(sur_poi.X, get_observations(sur_poi), trial, poi_observation_csv_file_path)
+        write_observations_to_csv(sur.X, get_observations(sur), trial, rollout_observation_csv_file_path)
     end 
 
 end
