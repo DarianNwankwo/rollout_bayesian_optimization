@@ -340,6 +340,7 @@ function simulate_trajectory(
     αxs, ∇αxs = zeros(tp.mc_iters), zeros(length(tp.x0), tp.mc_iters)
     deepcopy_s = Base.deepcopy(s)
 
+    Ts = Vector{Trajectory}(undef, tp.mc_iters)
     for sample_ndx in 1:tp.mc_iters
         # Rollout trajectory
         T = Trajectory(deepcopy_s, tp.x0, tp.h)
@@ -347,12 +348,14 @@ function simulate_trajectory(
             rnstream=tp.rnstream_sequence[sample_ndx, :, :],
             xstarts=xstarts
         )
-        monitor(T)
+        Ts[sample_ndx] = deepcopy(T)
         
         # Evaluate rolled out trajectory
         αxs[sample_ndx] = α(T)
         ∇αxs[:, sample_ndx] = ∇α(T)
     end
+
+    monitor(Ts)
 
     # Average trajectories
     μx = sum(αxs) / tp.mc_iters

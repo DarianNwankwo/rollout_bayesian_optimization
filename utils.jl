@@ -166,11 +166,24 @@ function generate_batch(N; lbs, ubs, ϵinterior=1e-2)
     s = SobolSeq(lbs, ubs)
     B = reduce(hcat, next!(s) for i = 1:N)
     # Concatenate a few points to B near the bounds in each respective dimension.
-    # lbs_interior = lbs .+ ϵinterior
-    # ubs_interior = ubs .- ϵinterior
-    # B = hcat(B, lbs_interior)
-    # B = hcat(B, ubs_interior)
+    lbs_interior = lbs .+ ϵinterior
+    ubs_interior = ubs .- ϵinterior
+    B = hcat(B, lbs_interior)
+    B = hcat(B, ubs_interior)
     return B
+end
+
+function filter_batch!(B::Matrix{Float64}, X::Matrix{Float64}; ϵ=1e-2)
+    # For all the points in the batch B, check if any of the points in X are within ϵ
+    # of the points in B. If so, remove that point from B.
+    for i = 1:size(B, 2)
+        for j = 1:size(X, 2)
+            if norm(B[:,i] - X[:,j]) < ϵ
+                B = B[:, 1:i-1]
+                break
+            end
+        end
+    end
 end
 
 
@@ -222,6 +235,8 @@ function update_x_adam!(x0::Vector{Float64}; ∇g,  λ, β1, β2, ϵ, m, v, lbs,
     return x  # Return updated position and updated moment estimates
 end
 
+
+
 function stochastic_gradient_ascent_adam(;
     λ=0.01, β1=0.9, β2=0.999, ϵ=1e-8, ftol=1e-6, gtol=1e-6, varred=true,
     sur::RBFsurrogate, tp::TrajectoryParameters, max_sgd_iters::Int, xstarts::Matrix{Float64})
@@ -242,7 +257,7 @@ function stochastic_gradient_ascent_adam(;
         μx, ∇μx, μx_stderr, ∇μx_stderr = simulate_trajectory(sur, tp, xstarts; variance_reduction=varred)
 
         # Update position and moment estimates
-        tp.x0 = update_x_adam!(tp.x0; ∇g=∇μx, λ=λ, β1=β1, β2=β2, ϵ=ϵ, m=m, v=v, lbs=lbs, ubs=ubs)
+        tp.x0 = update_x_adam!(tp.x0; ∇g=∇μx, λ=λ, β1=β1, β2=β2, ϵ=ϵ, m=m, v=v, lbs=tp.lbs, ubs=tp.ubs)
         xfinish = tp.x0
         push!(xall, tp.x0)
         push!(rewards, μx)
