@@ -7,14 +7,14 @@ using Random
 using CSV
 using DataFrames
 using Dates
-using SharedArray
 using Distributed
+using SharedArrays
+
 
 addprocs()
-
-include("../testfns.jl")
-include("../rollout.jl")
-include("../utils.jl")
+@everywhere include("../testfns.jl")
+@everywhere include("../rollout.jl")
+@everywhere include("../utils.jl")
 
 
 function parse_command_line(args)
@@ -69,130 +69,6 @@ function parse_command_line(args)
 end
 
 
-"""
-Given a limited evaluation budget, we evaluate the performance of an algorithm in terms of gap G. The gap measures the
-best decrease in objective function from the first to the last iteration, normalized by the maximum reduction possible.
-"""
-function measure_gap(observations::Vector{T}, fbest::T) where T <: Number
-    ϵ = 1e-8
-    initial_minimum = observations[1]
-    subsequent_minimums = [
-        minimum(observations[1:j]) for j in 1:length(observations)
-    ]
-    numerator = initial_minimum .- subsequent_minimums
-    
-    if abs(fbest - initial_minimum) < ϵ
-        return 1. 
-    end
-    
-    denominator = initial_minimum - fbest
-    result = numerator ./ denominator
-
-    for i in 1:length(result)
-        if result[i] < ϵ
-            result[i] = 0
-        end
-    end
-
-    return result
-end
-
-
-function create_gap_csv_file(
-    parent_directory::String,
-    child_directory::String,
-    csv_filename::String,
-    budget::Int
-    )
-    # Create directory for finished experiment
-    self_filename, extension = splitext(basename(@__FILE__))
-    dir_name = parent_directory * "/" * self_filename * "/" * child_directory
-    mkpath(dir_name)
-
-    # Write the header to the csv file
-    path_to_csv_file = dir_name * "/" * csv_filename
-    col_names = vcat(["trial"], ["$i" for i in 0:budget])
-
-    CSV.write(
-        path_to_csv_file,
-        DataFrame(
-            -ones(1, budget + 2),
-            Symbol.(col_names)
-        )    
-    )
-
-    return path_to_csv_file
-end
-
-
-"""
-Creates a csv file to store the observations of the algorithm.
-"""
-function create_observation_csv_file(
-    parent_directory::String,
-    child_directory::String,
-    csv_filename::String,
-    budget::Int
-    )
-    # Get directory for experiment
-    self_filename, extension = splitext(basename(@__FILE__))
-    dir_name = parent_directory * "/" * self_filename * "/" * child_directory
-    
-    # Write the header to the csv file
-    path_to_csv_file = dir_name * "/" * csv_filename
-    col_names = vcat(["trial"], ["observation_pair_$i" for i in 1:budget])
-
-    CSV.write(
-        path_to_csv_file,
-        DataFrame(
-            -ones(1, budget + 1),
-            Symbol.(col_names)
-        )    
-    )
-    
-    return path_to_csv_file
-end
-
-
-function write_gap_to_csv(
-    gaps::Vector{T},
-    trial_number::Int,
-    path_to_csv_file::String
-    ) where T <: Number
-    # Write gap to csv
-    CSV.write(
-        path_to_csv_file,
-        Tables.table(
-            hcat([trial_number gaps'])
-        ),
-        append=true,
-    )
-
-    return nothing
-end
-
-
-function write_observations_to_csv(
-    X::Matrix{T},
-    y::Vector{T},
-    trial_number::Int,
-    path_to_csv_file::String
-    ) where T <: Number
-    # Write observations to csv
-    d, N = size(X)
-    X = hcat(trial_number * ones(d, 1), X)
-    X = vcat(X, [trial_number y'])
-    
-    CSV.write(
-        path_to_csv_file,
-        Tables.table(X),
-        append=true,
-    )
-
-    return nothing
-end
-
-
 function generate_initial_guesses(N::Int, lbs::Vector{T}, ubs::Vector{T},) where T <: Number
     ϵ = 1e-6
     seq = SobolSeq(lbs, ubs)
@@ -239,7 +115,6 @@ function rollout_solver(;
     return best_tuple.finish, best_tuple.final_obj
 end
 
-
 function distributed_rollout_solver(;
     sur::RBFsurrogate,
     tp::TrajectoryParameters,
@@ -282,7 +157,7 @@ end
 
 function main()
     cli_args = parse_command_line(ARGS)
-    Random.seed!(2024)
+    Random.seed!(1823)
     BUDGET = cli_args["budget"]
     NUMBER_OF_TRIALS = cli_args["trials"]
     NUMBER_OF_STARTS = cli_args["starts"]
@@ -341,7 +216,7 @@ function main()
 
     # Build the test function object
     payload = testfn_payloads[cli_args["function-name"]]
-    println("Running experiment for $(payload.name)...")
+    println("Running experiment for $(payload.name) with $(nprocs()) processes...")
     testfn = payload.fn(payload.args...)
     lbs, ubs = testfn.bounds[:,1], testfn.bounds[:,2]
 
@@ -353,17 +228,6 @@ function main()
 
     # Allocate all initial samples
     initial_samples = randsample(NUMBER_OF_TRIALS, testfn.dim, lbs, ubs)
-
-    # Allocate space for GAPS
-    rollout_gaps = zeros(BUDGET + 1)
-
-    # Create the CSV for the current test function being evaluated
-    rollout_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_gaps.csv", BUDGET)
-
-    # Create the CSV for the current test function being evaluated observations
-    rollout_observation_csv_file_path = create_observation_csv_file(
-        DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_observations.csv", BUDGET
-    )
 
     # Initialize the trajectory parameters
     tp = TrajectoryParameters(
@@ -390,6 +254,7 @@ function main()
         for budget in 1:BUDGET
             # Solve the acquisition function
             xbest, fbest = distributed_rollout_solver(sur=sur, tp=tp, xstarts=initial_guesses, batch=batch)
+            # xbest, fbest = rollout_solver(sur=sur, tp=tp, xstarts=initial_guesses, batch=batch)
             ybest = testfn.f(xbest)
             # Update the surrogate model
             sur = update_surrogate(sur, xbest, ybest)
@@ -400,16 +265,6 @@ function main()
             print("|")
         end
         println()
-
-        # Compute the GAP of the surrogate model
-        fbest = testfn.f(testfn.xopt[1])
-        rollout_gaps[:] .= measure_gap(get_observations(sur), fbest)
-
-        # Write the GAP to disk
-        write_gap_to_csv(rollout_gaps, trial, rollout_csv_file_path)
-
-        # Write the surrogate observations to disk
-        write_observations_to_csv(sur.X, get_observations(sur), trial, rollout_observation_csv_file_path)
     end 
 
 end

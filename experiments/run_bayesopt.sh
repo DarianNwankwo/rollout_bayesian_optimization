@@ -16,5 +16,5 @@ configurations=(
 # Loop over the experiment configurations and run each one in the background
 for config in "${configurations[@]}"; do
   # Run the Julia code in the background with the given configuration and output filename
-  julia bayesopt.jl $config &
+  julia myopic_bayesopt.jl $config &
 done
