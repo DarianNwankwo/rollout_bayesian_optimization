@@ -8,13 +8,19 @@ using CSV
 using DataFrames
 using Dates
 using SharedArrays
-using Distributed
+# using Distributed
+using Profile
+using ProfileView
 
-addprocs()
+Profile.init(n=10^7, delay=0.01)
+# addprocs()
 
-@everywhere include("../testfns.jl")
-@everywhere include("../rollout.jl")
-@everywhere include("../utils.jl")
+# @everywhere include("../testfns.jl")
+# @everywhere include("../rollout.jl")
+# @everywhere include("../utils.jl")
+include("../testfns.jl")
+include("../rollout.jl")
+include("../utils.jl")
 
 
 function parse_command_line(args)
@@ -24,19 +30,15 @@ function parse_command_line(args)
         "--optimize"
             action = :store_true
             help = "If set, the surrogate's hyperparameters will be optimized"
-        "--function-name"
-            action = :store_arg
-            help = "Function name"
-            required = true
         "--starts"
             action = :store_arg
             help = "Number of random starts for inner policy optimization (default: 16)"
-            default = 16
+            default = 8
             arg_type = Int
         "--trials"
             action = :store_arg
             help = "Number of trials with a different initial start (default: 50)"
-            default = 10
+            default = 2
             arg_type = Int
         "--budget"
             action = :store_arg
@@ -49,17 +51,17 @@ function parse_command_line(args)
             required = true
         "--mc-samples"
             action = :store_arg
-            help = "Number of Monte Carlo samples for the acquisition function (default: 25)"
+            help = "Number of Monte Carlo samples for the acquisition function (default: 50)"
             default = 25
             arg_type = Int
         "--horizon"
             action = :store_arg
             help = "Horizon for the rollout (default: 1)"
-            default = 1
+            default = 0
             arg_type = Int
         "--batch-size"
             action = :store_arg
-            help = "Batch size for the rollout (default: 1)"
+            help = "Batch size for the rollout (default: 16)"
             default = 8
             arg_type = Int
     end
@@ -209,7 +211,7 @@ function rollout_solver(;
     tp::TrajectoryParameters,
     xstarts::Matrix{Float64},
     batch::Matrix{Float64},
-    max_iterations::Int = 100,
+    max_iterations::Int = 25,
     varred::Bool = true,
     )
     batch_results = Array{Any, 1}(undef, size(batch, 2))
@@ -340,7 +342,8 @@ function main()
     ψ = kernel_matern52(θ)
 
     # Build the test function object
-    payload = testfn_payloads[cli_args["function-name"]]
+    # payload = testfn_payloads[cli_args["function-name"]]
+    payload = testfn_payloads["ackley1d"]
     println("Running experiment for $(payload.name)...")
     testfn = payload.fn(payload.args...)
     lbs, ubs = testfn.bounds[:,1], testfn.bounds[:,2]
@@ -419,4 +422,8 @@ function main()
 
 end
 
-main()
+# main()
+# @time main()
+# ProfileView.@profview main()
+# @profile main()
+# open(Profile.print, "profile.txt", "w")

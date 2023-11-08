@@ -211,7 +211,7 @@ function main()
     )
 
     # Gaussian process hyperparameters
-    θ, σn2 = [1.], 1e-6
+    θ, σn2 = [1.], 1e-4
     ψ = kernel_matern52(θ)
 
     # Build the test function object

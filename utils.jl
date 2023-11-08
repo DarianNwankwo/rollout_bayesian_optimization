@@ -277,8 +277,9 @@ function stochastic_gradient_ascent_adam(;
         end
     end
 
-    return (
+    result = (
         start=xstart, finish=xfinish, final_obj=rewards[end], final_grad=rewards_grads[end], iters=iters, success=true,
         sequence=xall, grads=rewards_grads, obj=rewards
     )
+    return result
 end
