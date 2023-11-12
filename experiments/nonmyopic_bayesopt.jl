@@ -24,19 +24,15 @@ function parse_command_line(args)
         "--optimize"
             action = :store_true
             help = "If set, the surrogate's hyperparameters will be optimized"
-        "--function-name"
-            action = :store_arg
-            help = "Function name"
-            required = true
         "--starts"
             action = :store_arg
             help = "Number of random starts for inner policy optimization (default: 16)"
-            default = 16
+            default = 8
             arg_type = Int
         "--trials"
             action = :store_arg
             help = "Number of trials with a different initial start (default: 50)"
-            default = 10
+            default = 50
             arg_type = Int
         "--budget"
             action = :store_arg
@@ -69,11 +65,7 @@ function parse_command_line(args)
 end
 
 
-"""
-Given a limited evaluation budget, we evaluate the performance of an algorithm in terms of gap G. The gap measures the
-best decrease in objective function from the first to the last iteration, normalized by the maximum reduction possible.
-"""
-function measure_gap(observations::Vector{T}, fbest::T) where T <: Number
+@everywhere function measure_gap(observations::Vector{T}, fbest::T) where T <: Number
     ϵ = 1e-8
     initial_minimum = observations[1]
     subsequent_minimums = [
@@ -125,9 +117,6 @@ function create_gap_csv_file(
 end
 
 
-"""
-Creates a csv file to store the observations of the algorithm.
-"""
 function create_observation_csv_file(
     parent_directory::String,
     child_directory::String,
@@ -204,7 +193,7 @@ function generate_initial_guesses(N::Int, lbs::Vector{T}, ubs::Vector{T},) where
 end
 
 
-function rollout_solver(;
+@everywhere function rollout_solver(;
     sur::RBFsurrogate,
     tp::TrajectoryParameters,
     xstarts::Matrix{Float64},
@@ -280,6 +269,15 @@ function distributed_rollout_solver(;
 end
 
 
+@everywhere function write_error_to_disk(filename::String, msg::String)
+    # Open a text file in write mode
+    open(filename, "w") do file
+        # Write a string to the file
+        write(file, msg)
+    end
+end
+
+
 function main()
     cli_args = parse_command_line(ARGS)
     Random.seed!(2024)
@@ -339,84 +337,92 @@ function main()
     θ, σn2 = [1.], 1e-6
     ψ = kernel_matern52(θ)
 
-    # Build the test function object
-    payload = testfn_payloads[cli_args["function-name"]]
-    println("Running experiment for $(payload.name)...")
-    testfn = payload.fn(payload.args...)
-    lbs, ubs = testfn.bounds[:,1], testfn.bounds[:,2]
+    for function_name in keys(testfn_payloads)
+        # Build the test function object
+        payload = testfn_payloads[function_name]
+        println("Running experiment for $(payload.name).")
+        testfn = payload.fn(payload.args...)
+        lbs, ubs = testfn.bounds[:,1], testfn.bounds[:,2]
 
-    # Generate low discrepancy sequence
-    lds_rns = gen_low_discrepancy_sequence(MC_SAMPLES, testfn.dim, HORIZON + 1)
+        # Generate low discrepancy sequence
+        lds_rns = gen_low_discrepancy_sequence(MC_SAMPLES, testfn.dim, HORIZON + 1)
 
-    # Allocate initial guesses for optimizer
-    initial_guesses = generate_initial_guesses(NUMBER_OF_STARTS, lbs, ubs)
+        # Allocate initial guesses for optimizer
+        initial_guesses = generate_initial_guesses(NUMBER_OF_STARTS, lbs, ubs)
 
-    # Allocate all initial samples
-    initial_samples = randsample(NUMBER_OF_TRIALS, testfn.dim, lbs, ubs)
+        # Allocate all initial samples
+        initial_samples = randsample(NUMBER_OF_TRIALS, testfn.dim, lbs, ubs)
 
-    # Allocate space for GAPS
-    rollout_gaps = zeros(BUDGET + 1)
+        # Allocate space for GAPS
+        rollout_gaps = SharedMatrix{Float64}(NUMBER_OF_TRIALS, BUDGET + 1)
+        rollout_observations = Vector{Matrix{Float64}}(undef, NUMBER_OF_TRIALS)
 
-    # Create the CSV for the current test function being evaluated
-    rollout_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_gaps.csv", BUDGET)
+        # Create the CSV for the current test function being evaluated
+        rollout_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_gaps.csv", BUDGET)
 
-    # Create the CSV for the current test function being evaluated observations
-    rollout_observation_csv_file_path = create_observation_csv_file(
-        DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_observations.csv", BUDGET
-    )
+        # Create the CSV for the current test function being evaluated observations
+        rollout_observation_csv_file_path = create_observation_csv_file(
+            DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_observations.csv", BUDGET
+        )
 
-    # Initialize the trajectory parameters
-    tp = TrajectoryParameters(
-        initial_samples[:, 1], # Will be overriden later
-        HORIZON,
-        MC_SAMPLES,
-        lds_rns,
-        lbs,
-        ubs,
-    )
+        # Initialize the trajectory parameters
+        tp = TrajectoryParameters(
+            initial_samples[:, 1], # Will be overriden later
+            HORIZON,
+            MC_SAMPLES,
+            lds_rns,
+            lbs,
+            ubs,
+        )
 
-    # Initialize batch of points to evaluate the rollout acquisition function
-    batch = generate_batch(BATCH_SIZE, lbs=tp.lbs, ubs=tp.ubs)
+        # Initialize batch of points to evaluate the rollout acquisition function
+        batch = generate_batch(BATCH_SIZE, lbs=tp.lbs, ubs=tp.ubs)
 
-    # TODO: Add the parallelism to number of trials.
-    # TODO: Add profiling to see where the code is spending it's time.
-    # TODO: Investigate SAA for Optimizer
-    # Statistics like: dist of number of steps of adam, cost per step,
-    # Refactor to execute the next function in the same process
-    for trial in 1:NUMBER_OF_TRIALS
-        println("($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS)...")
-        # Initialize surrogate model
-        Xinit = initial_samples[:, trial:trial]
-        yinit = testfn.f.(eachcol(Xinit))
-        sur = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
+        # TODO: Add the parallelism to number of trials.
+        # TODO: Investigate SAA for Optimizer
+        @sync @distributed for trial in 1:NUMBER_OF_TRIALS
+            try
+                println("($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS)...")
+                # Initialize surrogate model
+                Xinit = initial_samples[:, trial:trial]
+                yinit = testfn.f.(eachcol(Xinit))
+                sur = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
 
-        # Perform Bayesian optimization iterations
-        print("Budget Counter: ")
-        for budget in 1:BUDGET
-            # Solve the acquisition function
-            xbest, fbest = rollout_solver(sur=sur, tp=tp, xstarts=initial_guesses, batch=batch)
-            ybest = testfn.f(xbest)
-            # Update the surrogate model
-            sur = update_surrogate(sur, xbest, ybest)
+                # Perform Bayesian optimization iterations
+                print("Budget Counter: ")
+                for budget in 1:BUDGET
+                    # Solve the acquisition function
+                    xbest, fbest = rollout_solver(sur=sur, tp=tp, xstarts=initial_guesses, batch=batch)
+                    ybest = testfn.f(xbest)
+                    # Update the surrogate model
+                    sur = update_surrogate(sur, xbest, ybest)
 
-            if SHOULD_OPTIMIZE
-                sur = optimize_hypers_optim(sur, kernel_matern52)
+                    if SHOULD_OPTIMIZE
+                        sur = optimize_hypers_optim(sur, kernel_matern52)
+                    end
+                    print("|")
+                end
+                println()
+            catch failure_error
+                msg = "($(payload.name)) Trial $(trial) failed with error: $(failure_error)"
+                self_filename, extension = splitext(basename(@__FILE__))
+                filename = DATA_DIRECTORY * "/" * self_filename * "/" * payload.name * "_failed.txt"
+                write_error_to_disk(filename, msg)
             end
-            print("|")
+
+            # Compute the GAP of the surrogate model
+            fbest = testfn.f(testfn.xopt[1])
+            rollout_gaps[trial, :] .= measure_gap(get_observations(sur), fbest)
         end
-        println()
 
-        # Compute the GAP of the surrogate model
-        fbest = testfn.f(testfn.xopt[1])
-        rollout_gaps[:] .= measure_gap(get_observations(sur), fbest)
+        for trial in 1:NUMBER_OF_TRIALS
+            # Write the GAP to disk
+            write_gap_to_csv(rollout_gaps[trial, :], trial, rollout_csv_file_path)
 
-        # Write the GAP to disk
-        write_gap_to_csv(rollout_gaps, trial, rollout_csv_file_path)
-
-        # Write the surrogate observations to disk
-        write_observations_to_csv(sur.X, get_observations(sur), trial, rollout_observation_csv_file_path)
-    end 
-
+            # Write the surrogate observations to disk
+            # write_observations_to_csv(sur.X, get_observations(sur), trial, rollout_observation_csv_file_path)
+        end
+    end
 end
 
 main()

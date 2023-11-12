@@ -37,7 +37,7 @@ function compute_policy_perturbation(
     xnext::Vector{Float64},
     jacobian_matrix::Matrix{Float64},
     total_observations::Int,
-    j::Int)
+    j::Int)::Matrix{Float64}
     # Setup perturbation matrix where all columns, except 1, are zero.
     # println("Apply Perturbation to Column $(T.mfs.known_observed + j)")
     δXi = zeros(size(jacobian_matrix, 1), total_observations)
@@ -87,50 +87,6 @@ original process at.
 When we sample gradient information at x0, when x0 is near a known point, we have a tendency to learn an approximation
 of the underlying function that is not accurate.
 """
-# function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
-#     rnstream::Matrix{Float64}, xstarts::Matrix{Float64})
-#     # Initial draw at predetermined location not chosen by policy
-#     f0, ∇f0 = gp_draw(T.mfs, T.x0; stdnormal=rnstream[:,1])
-
-#     # Evaluate the surrogate at the initial location
-#     sx0 = T.fs(T.x0)
-#     δx0 = rand(length(T.x0))
-
-#     # Update surrogate, perturbed surrogate, and multioutput surrogate
-#     update_trajectory!(T, T.x0, δx0, f0, ∇f0)
-
-#     # Preallocate for newton solves
-#     xnext = zeros(length(T.x0))
-
-#     # Perform rollout for fantasized trajectories
-#     for j in 1:T.h
-#         # Solve base acquisition function to determine next sample location
-#         xnext = multistart_ei_solve(T.fs, lbs, ubs, xstarts)
-
-#         # Draw fantasized sample at proposed location after base acquisition solve
-#         fi, ∇fi = gp_draw(T.mfs, xnext; stdnormal=rnstream[:, j+1])
-
-#         # Evaluate the surrogate at the suggested location
-#         sxi = T.fs(xnext)
-#         δxi = zeros(length(xnext))
-#         if sxi.EI > 0
-#             δxi = -sxi.HEI \ T.δfs(sxi).∇EI
-#             # Update hessian if a new best is found on trajectory
-#             trajectory_start = T.mfs.known_observed + 1
-#             if fi < T.fmin && not_near(xnext, T.mfs.X[:, trajectory_start:end])
-#                 T.fmin = fi
-#                 T.opt_HEI = sxi.HEI
-#             end
-#         end
-       
-#         # Update surrogate, perturbed surrogate, and multioutput surrogate
-#         update_trajectory!(T, xnext, δxi, fi,  ∇fi)
-#     end
-
-#     return nothing
-# end
-
-# function rollout!(T::ForwardTrajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
 function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
     rnstream::Matrix{Float64}, xstarts::Matrix{Float64})
     # Initial draw at predetermined location not chosen by policy
@@ -152,20 +108,26 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
         fi, ∇fi = gp_draw(T.mfs, xnext; stdnormal=rnstream[:, j+1])
        
         # Placeholder for jacobian matrix
-        δxi_jacobian = zeros(length(xnext), length(xnext))
+        δxi_jacobian::Matrix{Float64} = zeros(length(xnext), length(xnext))
         # Intermediate matrices before summing placeholder
-        δxi_intermediates = []
+        # Create a type for an array of matrices
+        δxi_intermediates = Array{Matrix{Float64}}(undef, 0)
 
         total_observations = T.mfs.known_observed + T.mfs.fantasies_observed
         for (j, jacobian) in enumerate(T.jacobians)
             # Compute perturbation to each spatial location
             P = compute_policy_perturbation(T, xnext, jacobian, total_observations, j)
+            # println("P: $(P)")
             push!(δxi_intermediates, P)
         end
 
         # Sum all perturbations
         δxi_intermediates = reduce(+, δxi_intermediates)
-        δxi_jacobian = -T.fs(xnext).HEI \ δxi_intermediates
+        if det(T.fs(xnext).HEI) < 1e-16
+            δxi_jacobian = zeros(length(xnext), length(xnext))
+        else
+            δxi_jacobian = -T.fs(xnext).HEI \ δxi_intermediates
+        end
 
         # Update surrogate, perturbed surrogate, and multioutput surrogate
         update_fsurrogate!(T.fs, xnext, fi)
@@ -184,7 +146,7 @@ end
 
 
 function rollout_deterministic!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
-    xstarts::Matrix{Float64}, testfn::TestFunction, monitor=(trajectory) -> nothing)
+    xstarts::Matrix{Float64}, testfn::TestFunction)
     f0, ∇f0 = testfn.f(T.x0), testfn.∇f(T.x0)
 
     # Evaluate the surrogate at the initial location
@@ -198,7 +160,6 @@ function rollout_deterministic!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector
     xnext = zeros(length(T.x0))
 
     # Perform rollout for fantasized trajectories
-    Ts = [deepcopy(T)]
     for j in 1:T.h
         # Solve base acquisition function to determine next sample location
         xnext = multistart_ei_solve(T.fs, lbs, ubs, xstarts)
@@ -235,10 +196,8 @@ function rollout_deterministic!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector
         if fi < T.fmin
             T.fmin = fi
         end
-        push!(Ts, deepcopy(T))
     end
 
-    monitor(Ts)
     return nothing
 end
 
@@ -334,13 +293,11 @@ function simulate_trajectory(
     s::RBFsurrogate,
     tp::TrajectoryParameters,
     xstarts::Matrix{Float64};
-    variance_reduction::Bool=false,
-    monitor=(trajectory) -> nothing
+    variance_reduction::Bool=false
     )
     αxs, ∇αxs = zeros(tp.mc_iters), zeros(length(tp.x0), tp.mc_iters)
     deepcopy_s = Base.deepcopy(s)
 
-    Ts = Vector{Trajectory}(undef, tp.mc_iters)
     for sample_ndx in 1:tp.mc_iters
         # Rollout trajectory
         T = Trajectory(deepcopy_s, tp.x0, tp.h)
@@ -348,18 +305,15 @@ function simulate_trajectory(
             rnstream=tp.rnstream_sequence[sample_ndx, :, :],
             xstarts=xstarts
         )
-        Ts[sample_ndx] = deepcopy(T)
         
         # Evaluate rolled out trajectory
         αxs[sample_ndx] = α(T)
         ∇αxs[:, sample_ndx] = ∇α(T)
     end
 
-    monitor(Ts)
-
     # Average trajectories
-    μx = sum(αxs) / tp.mc_iters
-    ∇μx = vec(sum(∇αxs, dims=2) / tp.mc_iters)
+    μx::Float64 = sum(αxs) / tp.mc_iters
+    ∇μx::Vector{Float64} = vec(sum(∇αxs, dims=2) / tp.mc_iters)
     stderr_μx = sqrt(sum((αxs .- μx) .^ 2) / (tp.mc_iters - 1))
     stderr_∇μx = sqrt(sum((∇αxs .- ∇μx) .^ 2) / (tp.mc_iters - 1))
 
@@ -377,15 +331,14 @@ function simulate_trajectory_deterministic(
     tp::TrajectoryParameters,
     xstarts::Matrix{Float64};
     testfn::TestFunction,
-    variance_reduction::Bool=false,
-    monitor=(trajectory) -> nothing
+    variance_reduction::Bool=false
     )
     deepcopy_s = Base.deepcopy(s)
 
     # Rollout trajectory
     T = Trajectory(deepcopy_s, tp.x0, tp.h)
     rollout_deterministic!(T, tp.lbs, tp.ubs;
-        xstarts=xstarts, testfn=testfn, monitor=monitor
+        xstarts=xstarts, testfn=testfn
     )
 
     if variance_reduction

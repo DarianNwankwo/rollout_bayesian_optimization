@@ -31,7 +31,7 @@ It would be better to do this in parallel.
 """
 
 function multistart_ei_solve(s::FantasyRBFsurrogate, lbs::Vector{Float64},
-    ubs::Vector{Float64}, xstarts::Matrix{Float64})
+    ubs::Vector{Float64}, xstarts::Matrix{Float64})::Vector{Float64}
     candidates = []
     
     for i in 1:size(xstarts, 2)

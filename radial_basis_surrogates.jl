@@ -260,7 +260,7 @@ function fit_fsurrogate(s::RBFsurrogate, h::Int64)
     slice = 1:N
     X[:, slice] = @view s.X[:,:] 
     return FantasyRBFsurrogate(
-        deepcopy(s.ψ), X, K, L, deepcopy(s.y), deepcopy(s.c), deepcopy(s.σn2), deepcopy(s.ymean), h, N, 0
+        s.ψ, X, K, L, deepcopy(s.y), deepcopy(s.c), deepcopy(s.σn2), deepcopy(s.ymean), h, N, 0
     )
 end
 
@@ -659,7 +659,7 @@ function fit_multioutput_fsurrogate(s::RBFsurrogate, h::Int64)
     fantasies_observed = 0
 
     return MultiOutputFantasyRBFsurrogate(
-        deepcopy(s.ψ), X, K, L, deepcopy(s.y), ∇y, c, deepcopy(s.σn2), deepcopy(s.ymean),
+        s.ψ, X, K, L, deepcopy(s.y), ∇y, c, deepcopy(s.σn2), deepcopy(s.ymean),
         ∇ymean, h, known_observed, fantasies_observed
     )
 end
@@ -828,10 +828,10 @@ function eval(s::MultiOutputFantasyRBFsurrogate, x::Vector{Float64})
 end
 (s::MultiOutputFantasyRBFsurrogate)(x::Vector{Float64}) = eval(s, x)
 
-function gp_draw(mofs::MultiOutputFantasyRBFsurrogate, x::Vector{Float64}; stdnormal::Vector{Float64})
+function gp_draw(mofs::MultiOutputFantasyRBFsurrogate, x::Vector{Float64}; stdnormal::Vector{Float64})::Tuple{Float64, Vector{Float64}}
     mofsx = mofs(x)
     f_and_∇f =  mofsx.μ + mofsx.σ .* stdnormal
-    f, ∇f = f_and_∇f[1], f_and_∇f[2:end]
+    f::Float64, ∇f::Vector{Float64} = f_and_∇f[1], f_and_∇f[2:end]
     return f, ∇f
 end
 

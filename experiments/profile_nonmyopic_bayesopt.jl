@@ -33,22 +33,23 @@ function parse_command_line(args)
         "--starts"
             action = :store_arg
             help = "Number of random starts for inner policy optimization (default: 16)"
-            default = 8
+            default = 16
             arg_type = Int
         "--trials"
             action = :store_arg
             help = "Number of trials with a different initial start (default: 50)"
-            default = 2
+            default = 1
             arg_type = Int
         "--budget"
             action = :store_arg
             help = "Maximum budget for bayesian optimization (default: 15)"
-            default = 15
+            default = 5
             arg_type = Int
         "--output-dir"
             action = :store_arg
             help = "Output directory for GAPs and model observations"
-            required = true
+            default = "output"
+            # required = true
         "--mc-samples"
             action = :store_arg
             help = "Number of Monte Carlo samples for the acquisition function (default: 50)"
@@ -57,12 +58,12 @@ function parse_command_line(args)
         "--horizon"
             action = :store_arg
             help = "Horizon for the rollout (default: 1)"
-            default = 0
+            default = 1
             arg_type = Int
         "--batch-size"
             action = :store_arg
             help = "Batch size for the rollout (default: 16)"
-            default = 8
+            default = 4
             arg_type = Int
     end
 

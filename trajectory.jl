@@ -1,24 +1,12 @@
 include("radial_basis_surrogates.jl")
 
 
-# mutable struct Trajectory
-#     s::RBFsurrogate
-#     fs::Union{FantasyRBFsurrogate, Nothing}
-#     δfs::Union{δRBFsurrogate, Nothing}
-#     mfs::Union{MultiOutputFantasyRBFsurrogate, Nothing}
-#     opt_HEI::Union{Matrix{Float64}, Nothing}
-#     fmin::Union{Float64, Nothing}
-#     x0::Vector{Float64}
-#     h::Int
-# end
-
-# mutable struct ForwardTrajectory
 mutable struct Trajectory
     s::RBFsurrogate
-    fs::Union{FantasyRBFsurrogate, Nothing}
-    mfs::Union{MultiOutputFantasyRBFsurrogate, Nothing}
+    fs::FantasyRBFsurrogate
+    mfs::MultiOutputFantasyRBFsurrogate
     jacobians::Vector{Matrix{Float64}}
-    fmin::Union{Float64, Nothing}
+    fmin::Float64
     x0::Vector{Float64}
     h::Int
 end
@@ -34,10 +22,8 @@ function Trajectory(s::RBFsurrogate, x0::Vector{Float64}, h::Int)
     fsur = fit_fsurrogate(s, h)
     mfsur = fit_multioutput_fsurrogate(s, h)
 
-    # jacobians = [1e-6 * I(d)]
     jacobians = [I(d)]
 
-    # return ForwardTrajectory(s, fsur, mfsur, jacobians, fmin, x0, h)
     return Trajectory(s, fsur, mfsur, jacobians, fmin, x0, h)
 end
 
