@@ -6,11 +6,12 @@ using Sobol
 using Random
 using CSV
 using DataFrames
+using Dates
 
 
 include("../testfns.jl")
-include("../utils.jl")
 include("../rollout.jl")
+include("../utils.jl")
 
 
 function parse_command_line(args)
@@ -20,19 +21,15 @@ function parse_command_line(args)
         "--optimize"
             action = :store_true
             help = "If set, the surrogate's hyperparameters will be optimized"
-        "--function-name"
-            action = :store_arg
-            help = "Function name"
-            required = true
         "--starts"
             action = :store_arg
             help = "Number of random starts for inner policy optimization (default: 16)"
-            default = 16
+            default = 8
             arg_type = Int
         "--trials"
             action = :store_arg
             help = "Number of trials with a different initial start (default: 50)"
-            default = 10
+            default = 50
             arg_type = Int
         "--budget"
             action = :store_arg
@@ -42,17 +39,14 @@ function parse_command_line(args)
         "--output-dir"
             action = :store_arg
             help = "Output directory for GAPs and model observations"
-            required = true
+            default = "default_dir"
     end
 
     parsed_args = parse_args(args, parser)
     return parsed_args
 end
 
-"""
-Given a limited evaluation budget, we evaluate the performance of an algorithm in terms of gap G. The gap measures the
-best decrease in objective function from the first to the last iteration, normalized by the maximum reduction possible.
-"""
+
 function measure_gap(observations::Vector{T}, fbest::T) where T <: Number
     ϵ = 1e-8
     initial_minimum = observations[1]
@@ -103,9 +97,7 @@ function create_gap_csv_file(
     return path_to_csv_file
 end
 
-"""
-Creates a csv file to store the observations of the algorithm.
-"""
+
 function create_observation_csv_file(
     parent_directory::String,
     child_directory::String,
@@ -149,6 +141,7 @@ function write_gap_to_csv(
     return nothing
 end
 
+
 function write_observations_to_csv(
     X::Matrix{T},
     y::Vector{T},
@@ -168,6 +161,7 @@ function write_observations_to_csv(
 
     return nothing
 end
+
 
 function poi_solver(s::RBFsurrogate, lbs, ubs; initial_guesses, max_iterations=100)
     fbest = minimum(get_observations(s))
@@ -193,11 +187,7 @@ function poi_solver(s::RBFsurrogate, lbs, ubs; initial_guesses, max_iterations=1
     return final_minimizer
 end
 
-"""
-TODO: We need to specify the maximum number of iterations and terminate if we exhaust our budget
-TODO: EI for Rosenbrock looks like zeros everywhere, depending on how we sample. I suspect this
-is why our algorithm halts here.
-"""
+
 function ei_solver(s::RBFsurrogate, lbs, ubs; initial_guesses, max_iterations=100)
     fbest = minimum(get_observations(s))
 
@@ -240,6 +230,7 @@ function ei_solver(s::RBFsurrogate, lbs, ubs; initial_guesses, max_iterations=10
     return final_minimizer
 end
 
+
 function ucb_solver(s::RBFsurrogate, lbs, ubs; initial_guesses, β=3., max_iterations=100)
     fbest = minimum(get_observations(s))
 
@@ -263,6 +254,7 @@ function ucb_solver(s::RBFsurrogate, lbs, ubs; initial_guesses, β=3., max_itera
     return final_minimizer
 end
 
+
 function generate_initial_guesses(N::Int, lbs::Vector{T}, ubs::Vector{T},) where T <: Number
     ϵ = 1e-6
     seq = SobolSeq(lbs, ubs)
@@ -272,6 +264,25 @@ function generate_initial_guesses(N::Int, lbs::Vector{T}, ubs::Vector{T},) where
 
     return initial_guesses
 end
+
+
+function write_error_to_disk(filename::String, msg::String)
+    # Open a text file in write mode
+    open(filename, "w") do file
+        # Write a string to the file
+        write(file, msg)
+    end
+end
+
+
+function write_error_to_disk(filename::String, msg::String)
+    # Open a text file in write mode
+    open(filename, "w") do file
+        # Write a string to the file
+        write(file, msg)
+    end
+end
+
 
 function main()
     cli_args = parse_command_line(ARGS)
@@ -328,95 +339,108 @@ function main()
     θ, σn2 = [1.], 1e-6
     ψ = kernel_matern52(θ)
 
-    # Build the test function object
-    payload = testfn_payloads[cli_args["function-name"]]
-    println("Running experiment for $(payload.name)...")
-    testfn = payload.fn(payload.args...)
-    lbs, ubs = testfn.bounds[:,1], testfn.bounds[:,2]
+    for function_name in keys(testfn_payloads)
+        # Build the test function object
+        payload = testfn_payloads[function_name]
+        println("Running experiment for $(payload.name)...")
+        testfn = payload.fn(payload.args...)
+        lbs, ubs = testfn.bounds[:,1], testfn.bounds[:,2]
 
-    # Allocate initial guesses for optimizer
-    initial_guesses = generate_initial_guesses(NUMBER_OF_STARTS, lbs, ubs)
+        # Allocate initial guesses for optimizer
+        initial_guesses = generate_initial_guesses(NUMBER_OF_STARTS, lbs, ubs)
 
-    # Allocate all initial samples
-    initial_samples = randsample(NUMBER_OF_TRIALS, testfn.dim, lbs, ubs)
+        # Allocate all initial samples
+        initial_samples = randsample(NUMBER_OF_TRIALS, testfn.dim, lbs, ubs)
 
-    # Allocate space for GAPS
-    ei_gaps = zeros(BUDGET + 1)
-    ucb_gaps = zeros(BUDGET + 1)
-    poi_gaps = zeros(BUDGET + 1)
+        # Allocate space for GAPS
+        # ei_gaps = SharedMatrix{Float64}(NUMBER_OF_TRIALS, BUDGET + 1)
+        # ucb_gaps = SharedMatrix{Float64}(NUMBER_OF_TRIALS, BUDGET + 1)
+        # poi_gaps = SharedMatrix{Float64}(NUMBER_OF_TRIALS, BUDGET + 1)
+        ei_gaps = zeros(NUMBER_OF_TRIALS, BUDGET + 1)
+        ucb_gaps = zeros(NUMBER_OF_TRIALS, BUDGET + 1)
+        poi_gaps = zeros(NUMBER_OF_TRIALS, BUDGET + 1)
 
-    # Create the CSV for the current test function being evaluated
-    ei_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "ei_gaps.csv", BUDGET)
-    ucb_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "ucb_gaps.csv", BUDGET)
-    poi_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "poi_gaps.csv", BUDGET)
+        # Create the CSV for the current test function being evaluated
+        ei_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "ei_gaps.csv", BUDGET)
+        ucb_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "ucb_gaps.csv", BUDGET)
+        poi_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "poi_gaps.csv", BUDGET)
 
-    # Create the CSV for the current test function being evaluated observations
-    ei_observation_csv_file_path = create_observation_csv_file(
-        DATA_DIRECTORY, payload.name, "ei_observations.csv", BUDGET
-    )
-    ucb_observation_csv_file_path = create_observation_csv_file(
-        DATA_DIRECTORY, payload.name, "ucb_observations.csv", BUDGET
-    )
-    poi_observation_csv_file_path = create_observation_csv_file(
-        DATA_DIRECTORY, payload.name, "poi_observations.csv", BUDGET
-    )
+        # Create the CSV for the current test function being evaluated observations
+        # ei_observation_csv_file_path = create_observation_csv_file(
+        #     DATA_DIRECTORY, payload.name, "ei_observations.csv", BUDGET
+        # )
+        # ucb_observation_csv_file_path = create_observation_csv_file(
+        #     DATA_DIRECTORY, payload.name, "ucb_observations.csv", BUDGET
+        # )
+        # poi_observation_csv_file_path = create_observation_csv_file(
+        #     DATA_DIRECTORY, payload.name, "poi_observations.csv", BUDGET
+        # )
 
-    for trial in 1:NUMBER_OF_TRIALS
-        println("($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS)...")
-        # Initialize surrogate model
-        Xinit = initial_samples[:, trial:trial]
-        yinit = testfn.f.(eachcol(Xinit))
-        sur_ei = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
-        sur_poi = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
-        sur_ucb = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
+        for trial in 1:NUMBER_OF_TRIALS
+            try
+                println("($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS)...")
+                # Initialize surrogate model
+                Xinit = initial_samples[:, trial:trial]
+                yinit = testfn.f.(eachcol(Xinit))
+                sur_ei = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
+                sur_poi = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
+                sur_ucb = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
 
-        # Perform Bayesian optimization iterations
-        print("Budget Counter: ")
-        for budget in 1:BUDGET
-            # Solve the acquisition function
-            xbest, fbest = poi_solver(sur_poi, lbs, ubs; initial_guesses=initial_guesses)
-            ybest = testfn.f(xbest)
-            # Update the surrogate model
-            sur_poi = update_surrogate(sur_poi, xbest, ybest)
+                # Perform Bayesian optimization iterations
+                print("Budget Counter: ")
+                for budget in 1:BUDGET
+                    # Solve the acquisition function
+                    xbest, fbest = poi_solver(sur_poi, lbs, ubs; initial_guesses=initial_guesses)
+                    ybest = testfn.f(xbest)
+                    # Update the surrogate model
+                    sur_poi = update_surrogate(sur_poi, xbest, ybest)
 
-            # Solve the acquisition function
-            xbest, fbest = ei_solver(sur_ei, lbs, ubs; initial_guesses=initial_guesses)
-            ybest = testfn.f(xbest)
-            # Update the surrogate model
-            sur_ei = update_surrogate(sur_ei, xbest, ybest)
-            
-            # Solve the acquisition function
-            xbest, fbest = ucb_solver(sur_ucb, lbs, ubs; initial_guesses=initial_guesses)
-            ybest = testfn.f(xbest)
-            # Update the surrogate model
-            sur_ucb = update_surrogate(sur_ucb, xbest, ybest)
+                    # Solve the acquisition function
+                    xbest, fbest = ei_solver(sur_ei, lbs, ubs; initial_guesses=initial_guesses)
+                    ybest = testfn.f(xbest)
+                    # Update the surrogate model
+                    sur_ei = update_surrogate(sur_ei, xbest, ybest)
+                    
+                    # Solve the acquisition function
+                    xbest, fbest = ucb_solver(sur_ucb, lbs, ubs; initial_guesses=initial_guesses)
+                    ybest = testfn.f(xbest)
+                    # Update the surrogate model
+                    sur_ucb = update_surrogate(sur_ucb, xbest, ybest)
 
-            if SHOULD_OPTIMIZE
-                sur_poi = optimize_hypers_optim(sur_poi, kernel_matern52)
-                sur_ei = optimize_hypers_optim(sur_ei, kernel_matern52)
-                sur_ucb = optimize_hypers_optim(sur_ucb, kernel_matern52)
+                    if SHOULD_OPTIMIZE
+                        sur_poi = optimize_hypers_optim(sur_poi, kernel_matern52)
+                        sur_ei = optimize_hypers_optim(sur_ei, kernel_matern52)
+                        sur_ucb = optimize_hypers_optim(sur_ucb, kernel_matern52)
+                    end
+                    print("|")
+                end
+                println()
+
+                # Compute the GAP of the surrogate model
+                fbest = testfn.f(testfn.xopt[1])
+                ei_gaps[trial, :] .= measure_gap(get_observations(sur_ei), fbest)
+                ucb_gaps[trial, :] .= measure_gap(get_observations(sur_ucb), fbest)
+                poi_gaps[trial, :] .= measure_gap(get_observations(sur_poi), fbest)
+            catch failure_error
+                msg = "($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS) failed with error: $(failure_error)"
+                self_filename, extension = splitext(basename(@__FILE__))
+                filename = DATA_DIRECTORY * "/" * self_filename * "/" * payload.name * "_failed.txt"
+                write_error_to_disk(filename, msg)
             end
-            print("|")
         end
-        println()
 
-        # Compute the GAP of the surrogate model
-        fbest = testfn.f(testfn.xopt[1])
-        ei_gaps[:] .= measure_gap(get_observations(sur_ei), fbest)
-        ucb_gaps[:] .= measure_gap(get_observations(sur_ucb), fbest)
-        poi_gaps[:] .= measure_gap(get_observations(sur_poi), fbest)
+        for trial in 1:NUMBER_OF_TRIALS
+            # Write the GAP to disk
+            write_gap_to_csv(ei_gaps[trial, :], trial, ei_csv_file_path)
+            write_gap_to_csv(ucb_gaps[trial, :], trial, ucb_csv_file_path)
+            write_gap_to_csv(poi_gaps[trial, :], trial, poi_csv_file_path)
 
-        # Write the GAP to disk
-        write_gap_to_csv(ei_gaps, trial, ei_csv_file_path)
-        write_gap_to_csv(ucb_gaps, trial, ucb_csv_file_path)
-        write_gap_to_csv(poi_gaps, trial, poi_csv_file_path)
-
-        # Write the surrogate observations to disk
-        write_observations_to_csv(sur_ei.X, get_observations(sur_ei), trial, ei_observation_csv_file_path)
-        write_observations_to_csv(sur_ucb.X, get_observations(sur_ucb), trial, ucb_observation_csv_file_path)
-        write_observations_to_csv(sur_poi.X, get_observations(sur_poi), trial, poi_observation_csv_file_path)
-    end 
-
+            # # Write the surrogate observations to disk
+            # write_observations_to_csv(sur_ei.X, get_observations(sur_ei), trial, ei_observation_csv_file_path)
+            # write_observations_to_csv(sur_ucb.X, get_observations(sur_ucb), trial, ucb_observation_csv_file_path)
+            # write_observations_to_csv(sur_poi.X, get_observations(sur_poi), trial, poi_observation_csv_file_path)
+        end
+    end
 end
 
 main()

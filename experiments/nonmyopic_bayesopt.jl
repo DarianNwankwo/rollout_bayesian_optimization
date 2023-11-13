@@ -284,7 +284,6 @@ function main()
     BUDGET = cli_args["budget"]
     NUMBER_OF_TRIALS = cli_args["trials"]
     NUMBER_OF_STARTS = cli_args["starts"]
-    # Create a string of the current time to use as a directory name
     DATA_DIRECTORY = cli_args["output-dir"]
     SHOULD_OPTIMIZE = if haskey(cli_args, "optimize") cli_args["optimize"] else false end
     MC_SAMPLES = cli_args["mc-samples"]
@@ -403,16 +402,16 @@ function main()
                     print("|")
                 end
                 println()
+                
+                # Compute the GAP of the surrogate model
+                fbest = testfn.f(testfn.xopt[1])
+                rollout_gaps[trial, :] .= measure_gap(get_observations(sur), fbest)
             catch failure_error
                 msg = "($(payload.name)) Trial $(trial) failed with error: $(failure_error)"
                 self_filename, extension = splitext(basename(@__FILE__))
                 filename = DATA_DIRECTORY * "/" * self_filename * "/" * payload.name * "_failed.txt"
                 write_error_to_disk(filename, msg)
             end
-
-            # Compute the GAP of the surrogate model
-            fbest = testfn.f(testfn.xopt[1])
-            rollout_gaps[trial, :] .= measure_gap(get_observations(sur), fbest)
         end
 
         for trial in 1:NUMBER_OF_TRIALS
