@@ -61,178 +61,6 @@ function parse_command_line(args)
 end
 
 
-function measure_gap(observations::Vector{T}, fbest::T) where T <: Number
-    ϵ = 1e-8
-    initial_minimum = observations[1]
-    subsequent_minimums = [
-        minimum(observations[1:j]) for j in 1:length(observations)
-    ]
-    numerator = initial_minimum .- subsequent_minimums
-    
-    if abs(fbest - initial_minimum) < ϵ
-        return 1. 
-    end
-    
-    denominator = initial_minimum - fbest
-    result = numerator ./ denominator
-
-    for i in 1:length(result)
-        if result[i] < ϵ
-            result[i] = 0
-        end
-    end
-
-    return result
-end
-
-
-function create_gap_csv_file(
-    parent_directory::String,
-    child_directory::String,
-    csv_filename::String,
-    budget::Int
-    )
-    # Create directory for finished experiment
-    self_filename, extension = splitext(basename(@__FILE__))
-    dir_name = parent_directory * "/" * self_filename * "/" * child_directory
-    mkpath(dir_name)
-
-    # Write the header to the csv file
-    path_to_csv_file = dir_name * "/" * csv_filename
-    col_names = vcat(["trial"], ["$i" for i in 0:budget])
-
-    CSV.write(
-        path_to_csv_file,
-        DataFrame(
-            -ones(1, budget + 2),
-            Symbol.(col_names)
-        )    
-    )
-
-    return path_to_csv_file
-end
-
-
-function create_observation_csv_file(
-    parent_directory::String,
-    child_directory::String,
-    csv_filename::String,
-    budget::Int
-    )
-    # Get directory for experiment
-    self_filename, extension = splitext(basename(@__FILE__))
-    dir_name = parent_directory * "/" * self_filename * "/" * child_directory
-    
-    # Write the header to the csv file
-    path_to_csv_file = dir_name * "/" * csv_filename
-    col_names = vcat(["trial"], ["observation_pair_$i" for i in 1:budget])
-
-    CSV.write(
-        path_to_csv_file,
-        DataFrame(
-            -ones(1, budget + 1),
-            Symbol.(col_names)
-        )    
-    )
-    
-    return path_to_csv_file
-end
-
-
-function write_gap_to_csv(
-    gaps::Vector{T},
-    trial_number::Int,
-    path_to_csv_file::String
-    ) where T <: Number
-    # Write gap to csv
-    CSV.write(
-        path_to_csv_file,
-        Tables.table(
-            hcat([trial_number gaps'])
-        ),
-        append=true,
-    )
-
-    return nothing
-end
-
-
-function write_observations_to_csv(
-    X::Matrix{T},
-    y::Vector{T},
-    trial_number::Int,
-    path_to_csv_file::String
-    ) where T <: Number
-    # Write observations to csv
-    d, N = size(X)
-    X = hcat(trial_number * ones(d, 1), X)
-    X = vcat(X, [trial_number y'])
-    
-    CSV.write(
-        path_to_csv_file,
-        Tables.table(X),
-        append=true,
-    )
-
-    return nothing
-end
-
-
-function generate_initial_guesses(N::Int, lbs::Vector{T}, ubs::Vector{T},) where T <: Number
-    ϵ = 1e-6
-    seq = SobolSeq(lbs, ubs)
-    initial_guesses = reduce(hcat, next!(seq) for i = 1:N)
-    initial_guesses = hcat(initial_guesses, lbs .+ ϵ)
-    initial_guesses = hcat(initial_guesses, ubs .- ϵ)
-
-    return initial_guesses
-end
-
-
-function rollout_solver(;
-    sur::RBFsurrogate,
-    tp::TrajectoryParameters,
-    xstarts::Matrix{Float64},
-    batch::Matrix{Float64},
-    max_iterations::Int = 100,
-    varred::Bool = true,
-    )
-    batch_results = Array{Any, 1}(undef, size(batch, 2))
-
-    for i in 1:size(batch, 2)
-        # Update start of trajectory for each point in the batch
-        tp.x0 = batch[:, i]
-
-        # Perform stochastic gradient ascent on the point in the batch
-        batch_results[i] = stochastic_gradient_ascent_adam(
-            sur=sur,
-            tp=tp,
-            max_sgd_iters=max_iterations,
-            varred=varred,
-            xstarts=xstarts,
-        )
-    end
-
-    # Find the point in the batch that maximizes the rollout acquisition function
-    best_tuple = first(batch_results)
-    for result in batch_results[2:end]
-        if result.final_obj > best_tuple.final_obj
-            best_tuple = result
-        end
-    end
-
-    return best_tuple.finish, best_tuple.final_obj
-end
-
-
-function write_error_to_disk(filename::String, msg::String)
-    # Open a text file in write mode
-    open(filename, "w") do file
-        # Write a string to the file
-        write(file, msg)
-    end
-end
-
 
 function main()
     cli_args = parse_command_line(ARGS)
@@ -248,44 +76,44 @@ function main()
 
     # Establish the synthetic functions we want to evaluate our algorithms on.
     testfn_payloads = Dict(
-        # "gramacylee" => (name="gramacylee", fn=TestGramacyLee, args=()),
-        # "rastrigin" => (name="rastrigin", fn=TestRastrigin, args=(1)),
-        # "ackley1d" => (name="ackley1d", fn=TestAckley, args=(1)),
-        # "ackley2d" => (name="ackley2d", fn=TestAckley, args=(2)),
-        # "ackley3d" => (name="ackley3d", fn=TestAckley, args=(3)),
-        # "ackley4d" => (name="ackley4d", fn=TestAckley, args=(4)),
-        # "ackley10d" => (name="ackley10d", fn=TestAckley, args=(2)),
-        # "rosenbrock" => (name="rosenbrock", fn=TestRosenbrock, args=()),
-        # "sixhump" => (name="sixhump", fn=TestSixHump, args=()),
-        # "braninhoo" => (name="braninhoo", fn=TestBraninHoo, args=()),
-        # "hartmann3d" => (name="hartmann3d", fn=TestHartmann3D, args=()),
-        # "goldsteinprice" => (name="goldsteinprice", fn=TestGoldsteinPrice, args=()),
-        # "beale" => (name="beale", fn=TestBeale, args=()),
-        # "easom" => (name="easom", fn=TestEasom, args=()),
-        # "styblinskitang1d" => (name="styblinskitang1d", fn=TestStyblinskiTang, args=(1)),
-        # "styblinskitang2d" => (name="styblinskitang2d", fn=TestStyblinskiTang, args=(2)),
-        # "styblinskitang3d" => (name="styblinskitang3d", fn=TestStyblinskiTang, args=(3)),
-        # "styblinskitang4d" => (name="styblinskitang4d", fn=TestStyblinskiTang, args=(4)),
-        # "styblinskitang10d" => (name="styblinskitang10d", fn=TestStyblinskiTang, args=(10)),
-        # "bukinn6" => (name="bukinn6", fn=TestBukinN6, args=()),
-        # "crossintray" => (name="crossintray", fn=TestCrossInTray, args=()),
-        # "eggholder" => (name="eggholder", fn=TestEggHolder, args=()),
-        # "holdertable" => (name="holdertable", fn=TestHolderTable, args=()),
-        # "schwefel1d" => (name="schwefel1d", fn=TestSchwefel, args=(1)),
-        # "schwefel2d" => (name="schwefel2d", fn=TestSchwefel, args=(2)),
-        # "schwefel3d" => (name="schwefel3d", fn=TestSchwefel, args=(3)),
+        "gramacylee" => (name="gramacylee", fn=TestGramacyLee, args=()),
+        "rastrigin" => (name="rastrigin", fn=TestRastrigin, args=(1)),
+        "ackley1d" => (name="ackley1d", fn=TestAckley, args=(1)),
+        "ackley2d" => (name="ackley2d", fn=TestAckley, args=(2)),
+        "ackley3d" => (name="ackley3d", fn=TestAckley, args=(3)),
+        "ackley4d" => (name="ackley4d", fn=TestAckley, args=(4)),
+        "ackley10d" => (name="ackley10d", fn=TestAckley, args=(2)),
+        "rosenbrock" => (name="rosenbrock", fn=TestRosenbrock, args=()),
+        "sixhump" => (name="sixhump", fn=TestSixHump, args=()),
+        "braninhoo" => (name="braninhoo", fn=TestBraninHoo, args=()),
+        "hartmann3d" => (name="hartmann3d", fn=TestHartmann3D, args=()),
+        "goldsteinprice" => (name="goldsteinprice", fn=TestGoldsteinPrice, args=()),
+        "beale" => (name="beale", fn=TestBeale, args=()),
+        "easom" => (name="easom", fn=TestEasom, args=()),
+        "styblinskitang1d" => (name="styblinskitang1d", fn=TestStyblinskiTang, args=(1)),
+        "styblinskitang2d" => (name="styblinskitang2d", fn=TestStyblinskiTang, args=(2)),
+        "styblinskitang3d" => (name="styblinskitang3d", fn=TestStyblinskiTang, args=(3)),
+        "styblinskitang4d" => (name="styblinskitang4d", fn=TestStyblinskiTang, args=(4)),
+        "styblinskitang10d" => (name="styblinskitang10d", fn=TestStyblinskiTang, args=(10)),
+        "bukinn6" => (name="bukinn6", fn=TestBukinN6, args=()),
+        "crossintray" => (name="crossintray", fn=TestCrossInTray, args=()),
+        "eggholder" => (name="eggholder", fn=TestEggHolder, args=()),
+        "holdertable" => (name="holdertable", fn=TestHolderTable, args=()),
+        "schwefel1d" => (name="schwefel1d", fn=TestSchwefel, args=(1)),
+        "schwefel2d" => (name="schwefel2d", fn=TestSchwefel, args=(2)),
+        "schwefel3d" => (name="schwefel3d", fn=TestSchwefel, args=(3)),
         "schwefel4d" => (name="schwefel4d", fn=TestSchwefel, args=(4)),
-        # "schwefel10d" => (name="schwefel10d", fn=TestSchwefel, args=(10)),
-        # "levyn13" => (name="levyn13", fn=TestLevyN13, args=()),
-        # "trid1d" => (name="trid1d", fn=TestTrid, args=(1)),
-        # "trid2d" => (name="trid2d", fn=TestTrid, args=(2)),
-        # "trid3d" => (name="trid3d", fn=TestTrid, args=(3)),
-        # "trid4d" => (name="trid4d", fn=TestTrid, args=(4)),
-        # "trid10d" => (name="trid10d", fn=TestTrid, args=(10)),
-        # "mccormick" => (name="mccormick", fn=TestMccormick, args=()),
-        # "hartmann6d" => (name="hartmann6d", fn=TestHartmann6D, args=()),
-        # "hartmann4d" => (name="hartmann4d", fn=TestHartmann4D, args=()),
-        # "hartmann3d" => (name="hartmann3d", fn=TestHartmann3D, args=()),
+        "schwefel10d" => (name="schwefel10d", fn=TestSchwefel, args=(10)),
+        "levyn13" => (name="levyn13", fn=TestLevyN13, args=()),
+        "trid1d" => (name="trid1d", fn=TestTrid, args=(1)),
+        "trid2d" => (name="trid2d", fn=TestTrid, args=(2)),
+        "trid3d" => (name="trid3d", fn=TestTrid, args=(3)),
+        "trid4d" => (name="trid4d", fn=TestTrid, args=(4)),
+        "trid10d" => (name="trid10d", fn=TestTrid, args=(10)),
+        "mccormick" => (name="mccormick", fn=TestMccormick, args=()),
+        "hartmann6d" => (name="hartmann6d", fn=TestHartmann6D, args=()),
+        "hartmann4d" => (name="hartmann4d", fn=TestHartmann4D, args=()),
+        "hartmann3d" => (name="hartmann3d", fn=TestHartmann3D, args=()),
     )
 
     # Gaussian process hyperparameters

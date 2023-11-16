@@ -1,3 +1,5 @@
+using LinearAlgebra
+
 include("lazy_struct.jl")
 include("radial_basis_functions.jl")
 """

@@ -4,8 +4,8 @@ using Distributions
 using LinearAlgebra
 using Optim
 using ForwardDiff
+using Distributed
 
-# addprocs()
 # if nworkers() < 8
 #     addprocs(8 - nworkers())
 # end
@@ -101,7 +101,8 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
     # Perform rollout for fantasized trajectories
     for j in 1:T.h
         # Solve base acquisition function to determine next sample location
-        xnext = multistart_ei_solve(T.fs, lbs, ubs, xstarts)
+        xnext = distributed_multistart_ei_solve(T.fs, lbs, ubs, xstarts)
+        # xnext = multistart_ei_solve(T.fs, lbs, ubs, xstarts)
 
         # Draw fantasized sample at proposed location after base acquisition solve
         fi, ∇fi = gp_draw(T.mfs, xnext; stdnormal=rnstream[:, j+1])
@@ -325,25 +326,114 @@ function simulate_trajectory(
     return μx, ∇μx, stderr_μx, stderr_∇μx
 end
 
-function simulate_trajectory_deterministic(
+function distributed_simulate_trajectory(
     s::RBFsurrogate,
     tp::TrajectoryParameters,
     xstarts::Matrix{Float64};
-    testfn::TestFunction,
     variance_reduction::Bool=false
     )
+    αxs, ∇αxs = zeros(tp.mc_iters), zeros(length(tp.x0), tp.mc_iters)
     deepcopy_s = Base.deepcopy(s)
 
-    # Rollout trajectory
-    T = Trajectory(deepcopy_s, tp.x0, tp.h)
-    rollout_deterministic!(T, tp.lbs, tp.ubs;
-        xstarts=xstarts, testfn=testfn
-    )
+    @sync @distributed for sample_ndx in 1:tp.mc_iters
+        # Rollout trajectory
+        T = Trajectory(deepcopy_s, tp.x0, tp.h)
+        rollout!(T, tp.lbs, tp.ubs;
+            rnstream=tp.rnstream_sequence[sample_ndx, :, :],
+            xstarts=xstarts
+        )
+        
+        # Evaluate rolled out trajectory
+        αxs[sample_ndx] = α(T)
+        ∇αxs[:, sample_ndx] = ∇α(T)
+    end
+
+    # Average trajectories
+    μx::Float64 = sum(αxs) / tp.mc_iters
+    ∇μx::Vector{Float64} = vec(sum(∇αxs, dims=2) / tp.mc_iters)
+    stderr_μx = sqrt(sum((αxs .- μx) .^ 2) / (tp.mc_iters - 1))
+    stderr_∇μx = sqrt(sum((∇αxs .- ∇μx) .^ 2) / (tp.mc_iters - 1))
 
     if variance_reduction
         sx = s(tp.x0)
-        return α(T) + sx.EI, ∇α(T)
+        μx += sx.EI
+        ∇μx += sx.∇EI
     end
 
-    return α(T), ∇α(T)
+    return μx, ∇μx, stderr_μx, stderr_∇μx
+end
+
+
+function rollout_solver(;
+    sur::RBFsurrogate,
+    tp::TrajectoryParameters,
+    xstarts::Matrix{Float64},
+    batch::Matrix{Float64},
+    max_iterations::Int = 25,
+    varred::Bool = true,
+    )
+    batch_results = Array{Any, 1}(undef, size(batch, 2))
+
+    for i in 1:size(batch, 2)
+        # Update start of trajectory for each point in the batch
+        tp.x0 = batch[:, i]
+
+        # Perform stochastic gradient ascent on the point in the batch
+        batch_results[i] = stochastic_gradient_ascent_adam(
+            sur=sur,
+            tp=tp,
+            max_sgd_iters=max_iterations,
+            varred=varred,
+            xstarts=xstarts,
+        )
+    end
+
+    # Find the point in the batch that maximizes the rollout acquisition function
+    best_tuple = first(batch_results)
+    for result in batch_results[2:end]
+        if result.final_obj > best_tuple.final_obj
+            best_tuple = result
+        end
+    end
+
+    return best_tuple.finish, best_tuple.final_obj
+end
+
+function distributed_rollout_solver(;
+    sur::RBFsurrogate,
+    tp::TrajectoryParameters,
+    xstarts::Matrix{Float64},
+    batch::Matrix{Float64},
+    max_iterations::Int = 25,
+    varred::Bool = true,
+    )
+    final_locations = SharedMatrix{Float64}(length(tp.x0), size(batch, 2))
+    final_evaluations = SharedArray{Float64}(size(batch, 2))
+
+    @sync @distributed for i in 1:size(batch, 2)
+        # Update start of trajectory for each point in the batch
+        tp.x0 = batch[:, i]
+
+        # Perform stochastic gradient ascent on the point in the batch
+        result = stochastic_gradient_ascent_adam(
+            sur=sur,
+            tp=tp,
+            max_sgd_iters=max_iterations,
+            varred=varred,
+            xstarts=xstarts,
+        )
+        final_locations[:, i] = result.finish
+        final_evaluations[i] = result.final_obj
+    end
+
+    # Find the point in the batch that maximizes the rollout acquisition function
+    best_ndx, best_evaluation, best_location = 1, first(final_evaluations), final_locations[:, 1]
+    for i in 1:size(batch, 2)
+        if final_evaluations[i] > best_evaluation
+            best_ndx = i
+            best_evaluation = final_evaluations[i]
+        end
+    end
+
+    return (best_location, best_evaluation)
 end

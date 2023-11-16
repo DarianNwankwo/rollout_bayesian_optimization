@@ -1,3 +1,6 @@
+using SharedArrays
+using Distributed
+
 include("radial_basis_surrogates.jl")
 
 
@@ -47,6 +50,28 @@ function multistart_ei_solve(s::FantasyRBFsurrogate, lbs::Vector{Float64},
     candidates = filter(pair -> !any(isnan.(pair[1])), candidates)
     mini, j_mini = findmin(pair -> pair[2], candidates)
     minimizer = candidates[j_mini][1]
+
+    return minimizer
+end
+
+function distributed_multistart_ei_solve(s::FantasyRBFsurrogate, lbs::Vector{Float64},
+    ubs::Vector{Float64}, xstarts::Matrix{Float64})::Vector{Float64}
+    candidate_locations = SharedMatrix{Float64}(size(xstarts, 1), size(xstarts, 2))
+    candidate_values = SharedArray{Float64}(size(xstarts, 2))
+    
+    @sync @distributed for i in 1:size(xstarts, 2)
+        xi = xstarts[:,i]
+        try
+            minimizer, res = ei_solve(s, lbs, ubs, xi)
+            candidate_locations[:, i] = minimizer
+            candidate_values[i] = minimum(res)
+        catch e
+        end
+    end
+    
+    replace!(candidate_values, NaN => Inf)
+    mini, j_mini = findmin(candidate_values)
+    minimizer = candidate_locations[:, j_mini]
 
     return minimizer
 end

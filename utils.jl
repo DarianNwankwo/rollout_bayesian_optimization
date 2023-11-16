@@ -255,6 +255,7 @@ function stochastic_gradient_ascent_adam(;
 
         # Compute stochastic estimates of function and gradient
         μx, ∇μx, μx_stderr, ∇μx_stderr = simulate_trajectory(sur, tp, xstarts; variance_reduction=varred)
+        # μx, ∇μx, μx_stderr, ∇μx_stderr = distributed_simulate_trajectory(sur, tp, xstarts; variance_reduction=varred)
 
         # Update position and moment estimates
         tp.x0 = update_x_adam!(tp.x0; ∇g=∇μx, λ=λ, β1=β1, β2=β2, ϵ=ϵ, m=m, v=v, lbs=tp.lbs, ubs=tp.ubs)
@@ -282,4 +283,140 @@ function stochastic_gradient_ascent_adam(;
         sequence=xall, grads=rewards_grads, obj=rewards
     )
     return result
+end
+
+
+function measure_gap(observations::Vector{T}, fbest::T) where T <: Number
+    ϵ = 1e-8
+    initial_minimum = observations[1]
+    subsequent_minimums = [
+        minimum(observations[1:j]) for j in 1:length(observations)
+    ]
+    numerator = initial_minimum .- subsequent_minimums
+    
+    if abs(fbest - initial_minimum) < ϵ
+        return 1. 
+    end
+    
+    denominator = initial_minimum - fbest
+    result = numerator ./ denominator
+
+    for i in 1:length(result)
+        if result[i] < ϵ
+            result[i] = 0
+        end
+    end
+
+    return result
+end
+
+function create_gap_csv_file(
+    parent_directory::String,
+    child_directory::String,
+    csv_filename::String,
+    budget::Int
+    )
+    # Create directory for finished experiment
+    self_filename, extension = splitext(basename(@__FILE__))
+    dir_name = parent_directory * "/" * self_filename * "/" * child_directory
+    mkpath(dir_name)
+
+    # Write the header to the csv file
+    path_to_csv_file = dir_name * "/" * csv_filename
+    col_names = vcat(["trial"], ["$i" for i in 0:budget])
+
+    CSV.write(
+        path_to_csv_file,
+        DataFrame(
+            -ones(1, budget + 2),
+            Symbol.(col_names)
+        )    
+    )
+
+    return path_to_csv_file
+end
+
+
+function create_observation_csv_file(
+    parent_directory::String,
+    child_directory::String,
+    csv_filename::String,
+    budget::Int
+    )
+    # Get directory for experiment
+    self_filename, extension = splitext(basename(@__FILE__))
+    dir_name = parent_directory * "/" * self_filename * "/" * child_directory
+    
+    # Write the header to the csv file
+    path_to_csv_file = dir_name * "/" * csv_filename
+    col_names = vcat(["trial"], ["observation_pair_$i" for i in 1:budget])
+
+    CSV.write(
+        path_to_csv_file,
+        DataFrame(
+            -ones(1, budget + 1),
+            Symbol.(col_names)
+        )    
+    )
+    
+    return path_to_csv_file
+end
+
+
+function write_gap_to_csv(
+    gaps::Vector{T},
+    trial_number::Int,
+    path_to_csv_file::String
+    ) where T <: Number
+    # Write gap to csv
+    CSV.write(
+        path_to_csv_file,
+        Tables.table(
+            hcat([trial_number gaps'])
+        ),
+        append=true,
+    )
+
+    return nothing
+end
+
+
+function write_observations_to_csv(
+    X::Matrix{T},
+    y::Vector{T},
+    trial_number::Int,
+    path_to_csv_file::String
+    ) where T <: Number
+    # Write observations to csv
+    d, N = size(X)
+    X = hcat(trial_number * ones(d, 1), X)
+    X = vcat(X, [trial_number y'])
+    
+    CSV.write(
+        path_to_csv_file,
+        Tables.table(X),
+        append=true,
+    )
+
+    return nothing
+end
+
+
+function generate_initial_guesses(N::Int, lbs::Vector{T}, ubs::Vector{T},) where T <: Number
+    ϵ = 1e-6
+    seq = SobolSeq(lbs, ubs)
+    initial_guesses = reduce(hcat, next!(seq) for i = 1:N)
+    initial_guesses = hcat(initial_guesses, lbs .+ ϵ)
+    initial_guesses = hcat(initial_guesses, ubs .- ϵ)
+
+    return initial_guesses
+end
+
+
+function write_error_to_disk(filename::String, msg::String)
+    # Open a text file in write mode
+    open(filename, "w") do file
+        # Write a string to the file
+        write(file, msg)
+    end
 end
