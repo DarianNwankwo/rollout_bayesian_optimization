@@ -24,7 +24,10 @@ function ei_solve(s::FantasyRBFsurrogate, lbs::Vector{Float64}, ubs::Vector{Floa
 
     df = TwiceDifferentiable(fun, fun_grad!, fun_hess!, xstart)
     dfc = TwiceDifferentiableConstraints(lbs, ubs)
-    res = optimize(df, dfc, xstart, IPNewton())
+    res = optimize(
+        df, dfc, xstart, IPNewton(),
+        Optim.Options(x_tol=1e-3, f_tol=1e-3)
+    )
 
     return Optim.minimizer(res), res
 end

@@ -10,6 +10,7 @@ using Dates
 using SharedArrays
 using Distributed
 
+
 addprocs()
 
 @everywhere include("../testfns.jl")
@@ -51,7 +52,7 @@ function parse_command_line(args)
         "--horizon"
             action = :store_arg
             help = "Horizon for the rollout (default: 1)"
-            default = 1
+            default = 0
             arg_type = Int
         "--batch-size"
             action = :store_arg
@@ -62,6 +63,118 @@ function parse_command_line(args)
 
     parsed_args = parse_args(args, parser)
     return parsed_args
+end
+
+
+function create_gap_csv_file(
+    parent_directory::String,
+    child_directory::String,
+    csv_filename::String,
+    budget::Int
+    )
+    # Create directory for finished experiment
+    self_filename, extension = splitext(basename(@__FILE__))
+    dir_name = parent_directory * "/" * self_filename * "/" * child_directory
+    mkpath(dir_name)
+
+    # Write the header to the csv file
+    path_to_csv_file = dir_name * "/" * csv_filename
+    col_names = vcat(["trial"], ["$i" for i in 0:budget])
+
+    CSV.write(
+        path_to_csv_file,
+        DataFrame(
+            -ones(1, budget + 2),
+            Symbol.(col_names)
+        )    
+    )
+
+    return path_to_csv_file
+end
+
+
+function create_observation_csv_file(
+    parent_directory::String,
+    child_directory::String,
+    csv_filename::String,
+    budget::Int
+    )
+    # Get directory for experiment
+    self_filename, extension = splitext(basename(@__FILE__))
+    dir_name = parent_directory * "/" * self_filename * "/" * child_directory
+    
+    # Write the header to the csv file
+    path_to_csv_file = dir_name * "/" * csv_filename
+    col_names = vcat(["trial"], ["observation_pair_$i" for i in 1:budget])
+
+    CSV.write(
+        path_to_csv_file,
+        DataFrame(
+            -ones(1, budget + 1),
+            Symbol.(col_names)
+        )    
+    )
+    
+    return path_to_csv_file
+end
+
+
+function write_gap_to_csv(
+    gaps::Vector{T},
+    trial_number::Int,
+    path_to_csv_file::String
+    ) where T <: Number
+    # Write gap to csv
+    CSV.write(
+        path_to_csv_file,
+        Tables.table(
+            hcat([trial_number gaps'])
+        ),
+        append=true,
+    )
+
+    return nothing
+end
+
+
+function write_observations_to_csv(
+    X::Matrix{T},
+    y::Vector{T},
+    trial_number::Int,
+    path_to_csv_file::String
+    ) where T <: Number
+    # Write observations to csv
+    d, N = size(X)
+    X = hcat(trial_number * ones(d, 1), X)
+    X = vcat(X, [trial_number y'])
+    
+    CSV.write(
+        path_to_csv_file,
+        Tables.table(X),
+        append=true,
+    )
+
+    return nothing
+end
+
+
+function generate_initial_guesses(N::Int, lbs::Vector{T}, ubs::Vector{T},) where T <: Number
+    ϵ = 1e-6
+    seq = SobolSeq(lbs, ubs)
+    initial_guesses = reduce(hcat, next!(seq) for i = 1:N)
+    initial_guesses = hcat(initial_guesses, lbs .+ ϵ)
+    initial_guesses = hcat(initial_guesses, ubs .- ϵ)
+
+    return initial_guesses
+end
+
+
+function write_error_to_disk(filename::String, msg::String)
+    # Open a text file in write mode
+    open(filename, "w") do file
+        # Write a string to the file
+        write(file, msg)
+    end
 end
 
 
@@ -79,41 +192,42 @@ function main()
 
     # Establish the synthetic functions we want to evaluate our algorithms on.
     testfn_payloads = Dict(
-        "gramacylee" => (name="gramacylee", fn=TestGramacyLee, args=()),
-        "rastrigin" => (name="rastrigin", fn=TestRastrigin, args=(1)),
-        "ackley1d" => (name="ackley1d", fn=TestAckley, args=(1)),
+        # "gramacylee" => (name="gramacylee", fn=TestGramacyLee, args=()),
+        "rastrigin1d" => (name="rastrigin", fn=TestRastrigin, args=(1)),
+        "rastrigin4d" => (name="rastrigin4d", fn=TestRastrigin, args=(4)),
+        # "ackley1d" => (name="ackley1d", fn=TestAckley, args=(1)),
         # "ackley2d" => (name="ackley2d", fn=TestAckley, args=(2)),
         # "ackley3d" => (name="ackley3d", fn=TestAckley, args=(3)),
-        # "ackley4d" => (name="ackley4d", fn=TestAckley, args=(4)),
+        "ackley4d" => (name="ackley4d", fn=TestAckley, args=(4)),
         # "ackley10d" => (name="ackley10d", fn=TestAckley, args=(2)),
         # "rosenbrock" => (name="rosenbrock", fn=TestRosenbrock, args=()),
         # "sixhump" => (name="sixhump", fn=TestSixHump, args=()),
         # "braninhoo" => (name="braninhoo", fn=TestBraninHoo, args=()),
-        # "hartmann3d" => (name="hartmann3d", fn=TestHartmann3D, args=()),
+        "hartmann3d" => (name="hartmann3d", fn=TestHartmann3D, args=()),
         # "goldsteinprice" => (name="goldsteinprice", fn=TestGoldsteinPrice, args=()),
         # "beale" => (name="beale", fn=TestBeale, args=()),
-        # "easom" => (name="easom", fn=TestEasom, args=()),
+        "easom" => (name="easom", fn=TestEasom, args=()),
         # "styblinskitang1d" => (name="styblinskitang1d", fn=TestStyblinskiTang, args=(1)),
-        # "styblinskitang2d" => (name="styblinskitang2d", fn=TestStyblinskiTang, args=(2)),
+        "styblinskitang2d" => (name="styblinskitang2d", fn=TestStyblinskiTang, args=(2)),
         # "styblinskitang3d" => (name="styblinskitang3d", fn=TestStyblinskiTang, args=(3)),
         # "styblinskitang4d" => (name="styblinskitang4d", fn=TestStyblinskiTang, args=(4)),
         # "styblinskitang10d" => (name="styblinskitang10d", fn=TestStyblinskiTang, args=(10)),
-        # "bukinn6" => (name="bukinn6", fn=TestBukinN6, args=()),
+        "bukinn6" => (name="bukinn6", fn=TestBukinN6, args=()),
         # "crossintray" => (name="crossintray", fn=TestCrossInTray, args=()),
-        # "eggholder" => (name="eggholder", fn=TestEggHolder, args=()),
-        # "holdertable" => (name="holdertable", fn=TestHolderTable, args=()),
+        "eggholder" => (name="eggholder", fn=TestEggHolder, args=()),
+        "holdertable" => (name="holdertable", fn=TestHolderTable, args=()),
         # "schwefel1d" => (name="schwefel1d", fn=TestSchwefel, args=(1)),
         # "schwefel2d" => (name="schwefel2d", fn=TestSchwefel, args=(2)),
-        # "schwefel3d" => (name="schwefel3d", fn=TestSchwefel, args=(3)),
-        # "schwefel4d" => (name="schwefel4d", fn=TestSchwefel, args=(4)),
+        "schwefel3d" => (name="schwefel3d", fn=TestSchwefel, args=(3)),
+        "schwefel4d" => (name="schwefel4d", fn=TestSchwefel, args=(4)),
         # "schwefel10d" => (name="schwefel10d", fn=TestSchwefel, args=(10)),
-        # "levyn13" => (name="levyn13", fn=TestLevyN13, args=()),
-        # "trid1d" => (name="trid1d", fn=TestTrid, args=(1)),
+        "levyn13" => (name="levyn13", fn=TestLevyN13, args=()),
+        "trid1d" => (name="trid1d", fn=TestTrid, args=(1)),
         # "trid2d" => (name="trid2d", fn=TestTrid, args=(2)),
         # "trid3d" => (name="trid3d", fn=TestTrid, args=(3)),
-        # "trid4d" => (name="trid4d", fn=TestTrid, args=(4)),
+        "trid4d" => (name="trid4d", fn=TestTrid, args=(4)),
         # "trid10d" => (name="trid10d", fn=TestTrid, args=(10)),
-        # "mccormick" => (name="mccormick", fn=TestMccormick, args=()),
+        "mccormick" => (name="mccormick", fn=TestMccormick, args=()),
         # "hartmann6d" => (name="hartmann6d", fn=TestHartmann6D, args=()),
         # "hartmann4d" => (name="hartmann4d", fn=TestHartmann4D, args=()),
         # "hartmann3d" => (name="hartmann3d", fn=TestHartmann3D, args=()),
@@ -166,7 +280,8 @@ function main()
 
         # TODO: Add the parallelism to number of trials.
         # TODO: Investigate SAA for Optimizer
-        @sync @distributed for trial in 1:NUMBER_OF_TRIALS
+        # @sync @distributed for trial in 1:NUMBER_OF_TRIALS
+        for trial in 1:NUMBER_OF_TRIALS
             try
                 println("($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS)...")
                 # Initialize surrogate model
@@ -178,7 +293,8 @@ function main()
                 print("Budget Counter: ")
                 for budget in 1:BUDGET
                     # Solve the acquisition function
-                    xbest, fbest = distributed_rollout_solver(sur=sur, tp=tp, xstarts=initial_guesses, batch=batch)
+                    # xbest, fbest = distributed_rollout_solver(sur=sur, tp=tp, xstarts=initial_guesses, batch=batch)
+                    xbest, fbest = rollout_solver(sur=sur, tp=tp, xstarts=initial_guesses, batch=batch)
                     ybest = testfn.f(xbest)
                     # Update the surrogate model
                     sur = update_surrogate(sur, xbest, ybest)

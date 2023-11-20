@@ -31,7 +31,6 @@ end
 function bkronecker_quasirand(d, N, bounds, start=0)
     db, _ = size(bounds) 
     Z = kronecker_quasirand(d, N, start)
-    println(size(Z))
     
     for j = 1:d
         r = db == d ? 0 : j-1
