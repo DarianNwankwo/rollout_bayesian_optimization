@@ -257,7 +257,7 @@ function main()
     initial_samples = randsample(NUMBER_OF_TRIALS, testfn.dim, lbs, ubs)
 
     # Allocate space for GAPS
-    rollout_gaps = zeros(NUMBER_OF_TRIALS, BUDGET + 1)
+    rollout_gaps = zeros(BUDGET + 1)
     # rollout_observations = Vector{Matrix{Float64}}(undef, NUMBER_OF_TRIALS)
 
     # Create the CSV for the current test function being evaluated
@@ -285,7 +285,7 @@ function main()
     # TODO: Investigate SAA for Optimizer
     # @sync @distributed for trial in 1:NUMBER_OF_TRIALS
     for trial in 1:NUMBER_OF_TRIALS
-        try
+        # try
             println("($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS)...")
             # Initialize surrogate model
             Xinit = initial_samples[:, trial:trial]
@@ -311,21 +311,16 @@ function main()
             
             # Compute the GAP of the surrogate model
             fbest = testfn.f(testfn.xopt[1])
-            rollout_gaps[trial, :] .= measure_gap(get_observations(sur), fbest)
-        catch failure_error
-            msg = "($(payload.name)) Trial $(trial) failed with error: $(failure_error)"
-            self_filename, extension = splitext(basename(@__FILE__))
-            filename = DATA_DIRECTORY * "/" * self_filename * "/" * payload.name * "_failed.txt"
-            write_error_to_disk(filename, msg)
-        end
-    end
+            rollout_gaps[:] .= measure_gap(get_observations(sur), fbest)
 
-    for trial in 1:NUMBER_OF_TRIALS
-        # Write the GAP to disk
-        write_gap_to_csv(rollout_gaps[trial, :], trial, rollout_csv_file_path)
-
-        # Write the surrogate observations to disk
-        # write_observations_to_csv(sur.X, get_observations(sur), trial, rollout_observation_csv_file_path)
+            # Write the GAP to disk
+            write_gap_to_csv(rollout_gaps, trial, rollout_csv_file_path)
+        # catch failure_error
+        #     msg = "($(payload.name)) Trial $(trial) failed with error: $(failure_error)"
+        #     self_filename, extension = splitext(basename(@__FILE__))
+        #     filename = DATA_DIRECTORY * "/" * self_filename * "/" * payload.name * "_failed.txt"
+        #     write_error_to_disk(filename, msg)
+        # end
     end
 end
 

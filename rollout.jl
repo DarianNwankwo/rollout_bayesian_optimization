@@ -369,7 +369,7 @@ function rollout_solver(;
     tp::TrajectoryParameters,
     xstarts::Matrix{Float64},
     batch::Matrix{Float64},
-    max_iterations::Int = 25,
+    max_iterations::Int = 5,
     varred::Bool = true,
     )
     batch_results = Array{Any, 1}(undef, size(batch, 2))

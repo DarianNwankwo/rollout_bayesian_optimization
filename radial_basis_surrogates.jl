@@ -499,27 +499,6 @@ function fit_δsurrogate(fs::FantasyRBFsurrogate, δX::Matrix{Float64}, ∇ys::V
     return δRBFsurrogate(fs, δXpreallocate, δK, δy, δc, δymean)
 end
 
-function reset_δsurrogate!(δs::δRBFsurrogate, fs::FantasyRBFsurrogate)
-    # Reset base fantasized surrogate given a resetted fantasized surrogate
-    δs.fs = fs
-    # Reset the preallocated perturbation matrix δX
-    δs.X[:, :] .= 0.0
-    # Zero out fantasized entries of covariance matrix 
-    M = fs.known_observed + 1
-    δs.K[M:end, :] .= 0.0
-    δs.K[:, M:end] .= 0.0
-    # Reset the perturbation vector
-    ∇ys = [zeros(d) for i in 1:M-1]
-    δs.y = [dot(∇ys[j], δs.X[:,j]) for j=1:M-1]
-    δs.ymean = mean(δs.y)
-    δs.y .-= δs.ymean
-    # Update linear solve for coefficients
-    slice = 1:fs.known_observed
-    δs.c = fs.L[slice, slice]' \ (fs.L[slice, slice] \ (δs.y - δs.K[slice, slice]*fs.c))
-    # Update fantasies observed
-    δs.fs.fantasies_observed = 0
-    return nothing 
-end
 
 function update_δsurrogate!(δs::δRBFsurrogate, ufs::FantasyRBFsurrogate, δx::Vector{Float64}, ∇y::Vector{Float64})
     update_ndx = ufs.known_observed + ufs.fantasies_observed
@@ -859,13 +838,6 @@ end
 Given a multi-output GP surrogate and a point x, draw a sample from the
 posterior distribution of the function value and its gradient at x.
 """
-
-# function gp_draw(ms::MultiOutputFantasyRBFsurrogate, xloc; stdnormal)
-#     msx = ms(xloc)
-#     sample = msx.μ + msx.σ .* stdnormal
-#     f, ∇f = sample[1], sample[2:end]
-#     return f, ∇f
-# end
 
 function get_observations(s::Union{RBFsurrogate, FantasyRBFsurrogate, MultiOutputFantasyRBFsurrogate})
     return s.y .+ s.ymean
