@@ -101,8 +101,8 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
     # Perform rollout for fantasized trajectories
     for j in 1:T.h
         # Solve base acquisition function to determine next sample location
-        xnext = distributed_multistart_ei_solve(T.fs, lbs, ubs, xstarts)
-        # xnext = multistart_ei_solve(T.fs, lbs, ubs, xstarts)
+        # xnext = distributed_multistart_ei_solve(T.fs, lbs, ubs, xstarts)
+        xnext = multistart_ei_solve(T.fs, lbs, ubs,     xstarts)
 
         # Draw fantasized sample at proposed location after base acquisition solve
         fi, ∇fi = gp_draw(T.mfs, xnext; stdnormal=rnstream[:, j+1])
@@ -369,7 +369,7 @@ function rollout_solver(;
     tp::TrajectoryParameters,
     xstarts::Matrix{Float64},
     batch::Matrix{Float64},
-    max_iterations::Int = 5,
+    max_iterations::Int = 25,
     varred::Bool = true,
     )
     batch_results = Array{Any, 1}(undef, size(batch, 2))
