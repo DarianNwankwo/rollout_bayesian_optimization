@@ -86,8 +86,15 @@ original process at.
 When we sample gradient information at x0, when x0 is near a known point, we have a tendency to learn an approximation
 of the underlying function that is not accurate.
 """
-function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
-    rnstream::Matrix{Float64}, xstarts::Matrix{Float64})
+function rollout!(
+    T::Trajectory,
+    lbs::Vector{Float64},
+    ubs::Vector{Float64};
+    rnstream::Matrix{Float64},
+    xstarts::Matrix{Float64},
+    candidate_locations::SharedMatrix{Float64},
+    candidate_values::SharedArray{Float64}
+    )
     # Initial draw at predetermined location not chosen by policy
     f0, ∇f0 = gp_draw(T.mfs, T.x0; stdnormal=rnstream[:,1])
 
@@ -101,8 +108,11 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
     # Perform rollout for fantasized trajectories
     for j in 1:T.h
         # Solve base acquisition function to determine next sample location
-        # xnext = distributed_multistart_ei_solve(T.fs, lbs, ubs, xstarts)
-        xnext = multistart_ei_solve(T.fs, lbs, ubs,     xstarts)
+        xnext = distributed_multistart_ei_solve(
+            T.fs, lbs, ubs, xstarts,
+            candidate_locations=candidate_locations, candidate_values=candidate_values
+        )
+        # xnext = multistart_ei_solve(T.fs, lbs, ubs, xstarts)
 
         # Draw fantasized sample at proposed location after base acquisition solve
         fi, ∇fi = gp_draw(T.mfs, xnext; stdnormal=rnstream[:, j+1])
@@ -136,63 +146,6 @@ function rollout!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
         # Update jacobian matrix
         push!(T.jacobians, δxi_jacobian)
 
-        if fi < T.fmin
-            T.fmin = fi
-        end
-    end
-
-    return nothing
-end
-
-
-function rollout_deterministic!(T::Trajectory, lbs::Vector{Float64}, ubs::Vector{Float64};
-    xstarts::Matrix{Float64}, testfn::TestFunction)
-    f0, ∇f0 = testfn.f(T.x0), testfn.∇f(T.x0)
-
-    # Evaluate the surrogate at the initial location
-    sx0 = T.fs(T.x0)
-
-    # Update surrogate, perturbed surrogate, and multioutput surrogate
-    update_fsurrogate!(T.fs, T.x0, f0)
-    update_multioutput_fsurrogate!(T.mfs, T.x0, f0, ∇f0)
-
-    # Setup up evaluation locations for newton solves
-    xnext = zeros(length(T.x0))
-
-    # Perform rollout for fantasized trajectories
-    for j in 1:T.h
-        # Solve base acquisition function to determine next sample location
-        xnext = multistart_ei_solve(T.fs, lbs, ubs, xstarts)
-
-        # Draw fantasized sample at proposed location after base acquisition solve
-        fi, ∇fi = testfn.f(xnext), testfn.∇f(xnext)
-
-        # Placeholder for jacobian matrix
-        δxi_jacobian = zeros(length(xnext), length(xnext))
-        # Intermediate matrices before summing placeholder
-        δxi_intermediates = []
-
-        total_observations = T.mfs.known_observed + T.mfs.fantasies_observed
-        # println("Computing Jacobian for Column $(T.mfs.known_observed + j + 1)")
-        for (j, jacobian) in enumerate(T.jacobians)
-            # Compute perturbation to each spatial location
-            P = compute_policy_perturbation(T, xnext, jacobian, total_observations, j)
-            push!(δxi_intermediates, P)
-        end
-
-        # Sum all perturbations
-        # println("δxi_intermediates: $(δxi_intermediates)")
-        δxi_intermediates = reduce(+, δxi_intermediates)
-        δxi_jacobian = -T.fs(xnext).HEI \ δxi_intermediates
-
-        # Update surrogate, perturbed surrogate, and multioutput surrogate
-        update_fsurrogate!(T.fs, xnext, fi)
-        update_multioutput_fsurrogate!(T.mfs, xnext, fi, ∇fi)
-
-        # Update jacobian matrix
-        push!(T.jacobians, δxi_jacobian)
-
-        # Update if a new best is found on trajectory
         if fi < T.fmin
             T.fmin = fi
         end
@@ -267,33 +220,13 @@ function ∇α(T::Trajectory)
 end
 
 
-function visualize1D(T::Trajectory)
-    known_observed = T.fs.known_observed
-    xfs = T.mfs.X[:, known_observed+1:end]
-    p = plot(
-        0:T.h, xfs[1, :], color=:red, label=nothing, xlabel="Decision Epochs (h=$(T.h))",
-        ylabel="Control Space (xʳ)", title="Trajectory Visualization in 1D",
-        xticks=(0:T.h, ["Step $(i)" for i in 0:T.h]), xrotation=45, grid=false
-    )
-    vline!(0:T.h, color=:black, linestyle=:dash, linewidth=1, label=nothing, alpha=.2)
-    scatter!(0:T.h, xfs[1, :], color=:red, label=nothing)
-    # lbs, ubs not defined
-    yticks!(
-        round.(range(lbs[1], ubs[1], length=11), digits=1)
-    )
-
-    best_ndx, best_step = best(T)
-    scatter!([best_ndx-1], [best_step.x[1]], color=:green, label="Best Point")
-
-    return p
-end
-
-
 function simulate_trajectory(
     s::RBFsurrogate,
     tp::TrajectoryParameters,
     xstarts::Matrix{Float64};
-    variance_reduction::Bool=false
+    variance_reduction::Bool=false,
+    candidate_locations::SharedMatrix{Float64},
+    candidate_values::SharedArray{Float64}
     )
     αxs, ∇αxs = zeros(tp.mc_iters), zeros(length(tp.x0), tp.mc_iters)
     deepcopy_s = Base.deepcopy(s)
@@ -303,7 +236,9 @@ function simulate_trajectory(
         T = Trajectory(deepcopy_s, tp.x0, tp.h)
         rollout!(T, tp.lbs, tp.ubs;
             rnstream=tp.rnstream_sequence[sample_ndx, :, :],
-            xstarts=xstarts
+            xstarts=xstarts,
+            candidate_locations=candidate_locations,
+            candidate_values=candidate_values
         )
         
         # Evaluate rolled out trajectory
@@ -326,13 +261,17 @@ function simulate_trajectory(
     return μx, ∇μx, stderr_μx, stderr_∇μx
 end
 
+
 function distributed_simulate_trajectory(
     s::RBFsurrogate,
     tp::TrajectoryParameters,
     xstarts::Matrix{Float64};
-    variance_reduction::Bool=false
+    variance_reduction::Bool=false,
+    candidate_locations::SharedMatrix{Float64},
+    candidate_values::SharedArray{Float64},
+    αxs::SharedArray{Float64},
+    ∇αxs::SharedMatrix{Float64}
     )
-    αxs, ∇αxs = zeros(tp.mc_iters), zeros(length(tp.x0), tp.mc_iters)
     deepcopy_s = Base.deepcopy(s)
 
     @sync @distributed for sample_ndx in 1:tp.mc_iters
@@ -340,7 +279,9 @@ function distributed_simulate_trajectory(
         T = Trajectory(deepcopy_s, tp.x0, tp.h)
         rollout!(T, tp.lbs, tp.ubs;
             rnstream=tp.rnstream_sequence[sample_ndx, :, :],
-            xstarts=xstarts
+            xstarts=xstarts,
+            candidate_locations=candidate_locations,
+            candidate_values=candidate_values
         )
         
         # Evaluate rolled out trajectory
@@ -371,6 +312,8 @@ function rollout_solver(;
     batch::Matrix{Float64},
     max_iterations::Int = 25,
     varred::Bool = true,
+    candidate_locations::SharedMatrix{Float64},
+    candidate_values::SharedArray{Float64}
     )
     batch_results = Array{Any, 1}(undef, size(batch, 2))
 
@@ -379,12 +322,14 @@ function rollout_solver(;
         tp.x0 = batch[:, i]
 
         # Perform stochastic gradient ascent on the point in the batch
-        batch_results[i] = stochastic_gradient_ascent_adam(
+        batch_results[i] = stochastic_gradient_ascent_adam1(
             sur=sur,
             tp=tp,
             max_sgd_iters=max_iterations,
             varred=varred,
             xstarts=xstarts,
+            candidate_locations=candidate_locations,
+            candidate_values=candidate_values
         )
     end
 
@@ -404,13 +349,16 @@ function distributed_rollout_solver(;
     tp::TrajectoryParameters,
     xstarts::Matrix{Float64},
     batch::Matrix{Float64},
-    max_iterations::Int = 25,
+    max_iterations::Int = 100,
     varred::Bool = true,
+    candidate_locations::SharedMatrix{Float64},
+    candidate_values::SharedArray{Float64},
+    αxs::SharedArray{Float64},
+    ∇αxs::SharedMatrix{Float64},
+    final_locations::SharedMatrix{Float64},
+    final_evaluations::SharedArray{Float64}
     )
-    final_locations = SharedMatrix{Float64}(length(tp.x0), size(batch, 2))
-    final_evaluations = SharedArray{Float64}(size(batch, 2))
-
-    @sync @distributed for i in 1:size(batch, 2)
+    for i in 1:size(batch, 2)
         # Update start of trajectory for each point in the batch
         tp.x0 = batch[:, i]
 
@@ -421,6 +369,10 @@ function distributed_rollout_solver(;
             max_sgd_iters=max_iterations,
             varred=varred,
             xstarts=xstarts,
+            candidate_locations=candidate_locations,
+            candidate_values=candidate_values,
+            αxs=αxs,
+            ∇αxs=∇αxs
         )
         final_locations[:, i] = result.finish
         final_evaluations[i] = result.final_obj
@@ -432,6 +384,7 @@ function distributed_rollout_solver(;
         if final_evaluations[i] > best_evaluation
             best_ndx = i
             best_evaluation = final_evaluations[i]
+            best_location = final_locations[:, i]
         end
     end
 

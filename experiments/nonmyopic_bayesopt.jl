@@ -63,6 +63,11 @@ function parse_command_line(args)
             action = :store_arg
             help = "Name of the function to optimize"
             required = true
+        "--sgd-iterations"
+            action = :store_arg
+            help = "Number of iterations for SGD (default: 25)"
+            default = 25
+            arg_type = Int
     end
 
     parsed_args = parse_args(args, parser)
@@ -184,7 +189,7 @@ end
 
 function main()
     cli_args = parse_command_line(ARGS)
-    Random.seed!(2024)
+    Random.seed!(1906)
     BUDGET = cli_args["budget"]
     NUMBER_OF_TRIALS = cli_args["trials"]
     NUMBER_OF_STARTS = cli_args["starts"]
@@ -193,6 +198,7 @@ function main()
     MC_SAMPLES = cli_args["mc-samples"]
     HORIZON = cli_args["horizon"]
     BATCH_SIZE = cli_args["batch-size"]
+    SGD_ITERATIONS = cli_args["sgd-iterations"]
 
     # Establish the synthetic functions we want to evaluate our algorithms on.
     testfn_payloads = Dict(
@@ -281,11 +287,16 @@ function main()
     # Initialize batch of points to evaluate the rollout acquisition function
     batch = generate_batch(BATCH_SIZE, lbs=tp.lbs, ubs=tp.ubs)
 
-    # TODO: Add the parallelism to number of trials.
-    # TODO: Investigate SAA for Optimizer
-    # @sync @distributed for trial in 1:NUMBER_OF_TRIALS
+    # Initialize shared memory for solving base policy in parallel
+    candidate_locations = SharedMatrix{Float64}(testfn.dim, NUMBER_OF_STARTS)
+    candidate_values = SharedArray{Float64}(NUMBER_OF_STARTS)
+    αxs = SharedArray{Float64}(tp.mc_iters)
+    ∇αxs = SharedMatrix{Float64}(testfn.dim, tp.mc_iters)
+    final_locations = SharedMatrix{Float64}(length(tp.x0), size(batch, 2))
+    final_evaluations = SharedArray{Float64}(size(batch, 2))
+
     for trial in 1:NUMBER_OF_TRIALS
-        # try
+        try
             println("($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS)...")
             # Initialize surrogate model
             Xinit = initial_samples[:, trial:trial]
@@ -296,8 +307,15 @@ function main()
             print("Budget Counter: ")
             for budget in 1:BUDGET
                 # Solve the acquisition function
-                # xbest, fbest = distributed_rollout_solver(sur=sur, tp=tp, xstarts=initial_guesses, batch=batch)
-                xbest, fbest = rollout_solver(sur=sur, tp=tp, xstarts=initial_guesses, batch=batch)
+                # xbest, fbest = rollout_solver(
+                #     sur=sur, tp=tp, xstarts=initial_guesses, batch=batch, max_iterations=SGD_ITERATIONS,
+                #     candidate_locations=candidate_locations, candidate_values=candidate_values
+                # )
+                xbest, fbest = distributed_rollout_solver(
+                    sur=sur, tp=tp, xstarts=initial_guesses, batch=batch, max_iterations=SGD_ITERATIONS,
+                    candidate_locations=candidate_locations, candidate_values=candidate_values,
+                    αxs=αxs, ∇αxs=∇αxs, final_locations=final_locations, final_evaluations=final_evaluations
+                )
                 ybest = testfn.f(xbest)
                 # Update the surrogate model
                 sur = update_surrogate(sur, xbest, ybest)
@@ -315,13 +333,17 @@ function main()
 
             # Write the GAP to disk
             write_gap_to_csv(rollout_gaps, trial, rollout_csv_file_path)
-        # catch failure_error
-        #     msg = "($(payload.name)) Trial $(trial) failed with error: $(failure_error)"
-        #     self_filename, extension = splitext(basename(@__FILE__))
-        #     filename = DATA_DIRECTORY * "/" * self_filename * "/" * payload.name * "_failed.txt"
-        #     write_error_to_disk(filename, msg)
-        # end
+            # Write the surrogate observations to disk
+            write_observations_to_csv(sur.X, get_observations(sur), trial, rollout_observation_csv_file_path)
+        catch failure_error
+            msg = "($(payload.name)) Trial $(trial) failed with error: $(failure_error)"
+            self_filename, extension = splitext(basename(@__FILE__))
+            filename = DATA_DIRECTORY * "/" * self_filename * "/" * payload.name * "_failed.txt"
+            write_error_to_disk(filename, msg)
+        end
     end
+
+    println("Completed")
 end
 
 main()

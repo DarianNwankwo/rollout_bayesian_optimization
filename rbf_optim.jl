@@ -57,11 +57,14 @@ function multistart_ei_solve(s::FantasyRBFsurrogate, lbs::Vector{Float64},
     return minimizer
 end
 
-function distributed_multistart_ei_solve(s::FantasyRBFsurrogate, lbs::Vector{Float64},
-    ubs::Vector{Float64}, xstarts::Matrix{Float64})::Vector{Float64}
-    candidate_locations = SharedMatrix{Float64}(size(xstarts, 1), size(xstarts, 2))
-    candidate_values = SharedArray{Float64}(size(xstarts, 2))
-    
+function distributed_multistart_ei_solve(
+    s::FantasyRBFsurrogate,
+    lbs::Vector{Float64},
+    ubs::Vector{Float64},
+    xstarts::Matrix{Float64};
+    candidate_locations::SharedMatrix{Float64},
+    candidate_values::SharedArray{Float64}
+    )::Vector{Float64}
     @sync @distributed for i in 1:size(xstarts, 2)
         xi = xstarts[:,i]
         try
