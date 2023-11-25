@@ -22,6 +22,11 @@ function parse_command_line(args)
     parser = ArgParseSettings("Myopic Bayesian Optimization CLI")
 
     @add_arg_table! parser begin
+        "--seed"
+            action = :store_arg
+            help = "Seed for random number generation"
+            default = 1906
+            arg_type = Int
         "--optimize"
             action = :store_true
             help = "If set, the surrogate's hyperparameters will be optimized"
@@ -180,7 +185,7 @@ end
 
 function write_error_to_disk(filename::String, msg::String)
     # Open a text file in write mode
-    open(filename, "w") do file
+    open(filename, "w+") do file
         # Write a string to the file
         write(file, msg)
     end
@@ -189,7 +194,7 @@ end
 
 function main()
     cli_args = parse_command_line(ARGS)
-    Random.seed!(1906)
+    Random.seed!(cli_args["seed"])
     BUDGET = cli_args["budget"]
     NUMBER_OF_TRIALS = cli_args["trials"]
     NUMBER_OF_STARTS = cli_args["starts"]
