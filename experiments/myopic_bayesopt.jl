@@ -40,6 +40,10 @@ function parse_command_line(args)
             action = :store_arg
             help = "Output directory for GAPs and model observations"
             default = "default_dir"
+        "--function-name"
+            action = :store_arg
+            help = "Name of the function to optimize"
+            required = true
     end
 
     parsed_args = parse_args(args, parser)
@@ -176,7 +180,10 @@ function poi_solver(s::RBFsurrogate, lbs, ubs; initial_guesses, max_iterations=1
     
     for j in 1:size(initial_guesses, 2)
         initial_guess = initial_guesses[:, j]
-        result = optimize(poi, lbs, ubs, initial_guess, Fminbox(LBFGS()), Optim.Options(iterations=max_iterations))
+        result = optimize(
+            poi, lbs, ubs, initial_guess, Fminbox(LBFGS()),
+            Optim.Options(x_tol=1e-3, f_tol=1e-3)
+        )
         cur_minimizer, cur_minimum = Optim.minimizer(result), Optim.minimum(result)
 
         if cur_minimum < final_minimizer[2]
@@ -219,7 +226,10 @@ function ei_solver(s::RBFsurrogate, lbs, ubs; initial_guesses, max_iterations=10
         initial_guess = initial_guesses[:, j]
         df = TwiceDifferentiable(ei, ei_grad!, ei_hessian!, initial_guess)
         dfc = TwiceDifferentiableConstraints(lbs, ubs)
-        result = optimize(df, dfc, initial_guess, IPNewton(), Optim.Options(iterations=max_iterations))
+        result = optimize(
+            df, dfc, initial_guess, IPNewton(),
+            Optim.Options(x_tol=1e-3, f_tol=1e-3)
+        )
         cur_minimizer, cur_minimum = Optim.minimizer(result), Optim.minimum(result)
 
         if cur_minimum < final_minimizer[2]
@@ -243,7 +253,10 @@ function ucb_solver(s::RBFsurrogate, lbs, ubs; initial_guesses, β=3., max_itera
     
     for j in 1:size(initial_guesses, 2)
         initial_guess = initial_guesses[:, j]
-        result = optimize(ucb, lbs, ubs, initial_guess, Fminbox(LBFGS()), Optim.Options(iterations=max_iterations))
+        result = optimize(
+            ucb, lbs, ubs, initial_guess, Fminbox(LBFGS()),
+            Optim.Options(x_tol=1e-3, f_tol=1e-3)
+            )
         cur_minimizer, cur_minimum = Optim.minimizer(result), Optim.minimum(result)
 
         if cur_minimum < final_minimizer[2]
@@ -296,7 +309,8 @@ function main()
     # Establish the synthetic functions we want to evaluate our algorithms on.
     testfn_payloads = Dict(
         "gramacylee" => (name="gramacylee", fn=TestGramacyLee, args=()),
-        "rastrigin" => (name="rastrigin", fn=TestRastrigin, args=(1)),
+        "rastrigin1d" => (name="rastrigin1d", fn=TestRastrigin, args=(1)),
+        "rastrigi4d" => (name="rastrigin4d", fn=TestRastrigin, args=(4)),
         "ackley1d" => (name="ackley1d", fn=TestAckley, args=(1)),
         "ackley2d" => (name="ackley2d", fn=TestAckley, args=(2)),
         "ackley3d" => (name="ackley3d", fn=TestAckley, args=(3)),
@@ -339,106 +353,99 @@ function main()
     θ, σn2 = [1.], 1e-6
     ψ = kernel_matern52(θ)
 
-    for function_name in keys(testfn_payloads)
-        # Build the test function object
-        payload = testfn_payloads[function_name]
-        println("Running experiment for $(payload.name)...")
-        testfn = payload.fn(payload.args...)
-        lbs, ubs = testfn.bounds[:,1], testfn.bounds[:,2]
+    # Build the test function object
+    payload = testfn_payloads[cli_args["function-name"]]
+    println("Running experiment for $(payload.name)...")
+    testfn = payload.fn(payload.args...)
+    lbs, ubs = testfn.bounds[:,1], testfn.bounds[:,2]
 
-        # Allocate initial guesses for optimizer
-        initial_guesses = generate_initial_guesses(NUMBER_OF_STARTS, lbs, ubs)
+    # Allocate initial guesses for optimizer
+    initial_guesses = generate_initial_guesses(NUMBER_OF_STARTS, lbs, ubs)
 
-        # Allocate all initial samples
-        initial_samples = randsample(NUMBER_OF_TRIALS, testfn.dim, lbs, ubs)
+    # Allocate all initial samples
+    initial_samples = randsample(NUMBER_OF_TRIALS, testfn.dim, lbs, ubs)
 
-        # Allocate space for GAPS
-        # ei_gaps = SharedMatrix{Float64}(NUMBER_OF_TRIALS, BUDGET + 1)
-        # ucb_gaps = SharedMatrix{Float64}(NUMBER_OF_TRIALS, BUDGET + 1)
-        # poi_gaps = SharedMatrix{Float64}(NUMBER_OF_TRIALS, BUDGET + 1)
-        ei_gaps = zeros(NUMBER_OF_TRIALS, BUDGET + 1)
-        ucb_gaps = zeros(NUMBER_OF_TRIALS, BUDGET + 1)
-        poi_gaps = zeros(NUMBER_OF_TRIALS, BUDGET + 1)
+    # Allocate space for GAPS
+    ei_gaps = zeros(BUDGET + 1)
+    ucb_gaps = zeros(BUDGET + 1)
+    poi_gaps = zeros(BUDGET + 1)
 
-        # Create the CSV for the current test function being evaluated
-        ei_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "ei_gaps.csv", BUDGET)
-        ucb_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "ucb_gaps.csv", BUDGET)
-        poi_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "poi_gaps.csv", BUDGET)
+    # Create the CSV for the current test function being evaluated
+    ei_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "ei_gaps.csv", BUDGET)
+    ucb_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "ucb_gaps.csv", BUDGET)
+    poi_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "poi_gaps.csv", BUDGET)
 
-        # Create the CSV for the current test function being evaluated observations
-        # ei_observation_csv_file_path = create_observation_csv_file(
-        #     DATA_DIRECTORY, payload.name, "ei_observations.csv", BUDGET
-        # )
-        # ucb_observation_csv_file_path = create_observation_csv_file(
-        #     DATA_DIRECTORY, payload.name, "ucb_observations.csv", BUDGET
-        # )
-        # poi_observation_csv_file_path = create_observation_csv_file(
-        #     DATA_DIRECTORY, payload.name, "poi_observations.csv", BUDGET
-        # )
+    # Create the CSV for the current test function being evaluated observations
+    ei_observation_csv_file_path = create_observation_csv_file(
+        DATA_DIRECTORY, payload.name, "ei_observations.csv", BUDGET
+    )
+    ucb_observation_csv_file_path = create_observation_csv_file(
+        DATA_DIRECTORY, payload.name, "ucb_observations.csv", BUDGET
+    )
+    poi_observation_csv_file_path = create_observation_csv_file(
+        DATA_DIRECTORY, payload.name, "poi_observations.csv", BUDGET
+    )
 
-        for trial in 1:NUMBER_OF_TRIALS
-            try
-                println("($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS)...")
-                # Initialize surrogate model
-                Xinit = initial_samples[:, trial:trial]
-                yinit = testfn.f.(eachcol(Xinit))
-                sur_ei = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
-                sur_poi = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
-                sur_ucb = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
+    for trial in 1:NUMBER_OF_TRIALS
+        try
+            println("($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS)...")
+            # Initialize surrogate model
+            Xinit = initial_samples[:, trial:trial]
+            yinit = testfn.f.(eachcol(Xinit))
+            sur_ei = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
+            sur_poi = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
+            sur_ucb = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
 
-                # Perform Bayesian optimization iterations
-                print("Budget Counter: ")
-                for budget in 1:BUDGET
-                    # Solve the acquisition function
-                    xbest, fbest = poi_solver(sur_poi, lbs, ubs; initial_guesses=initial_guesses)
-                    ybest = testfn.f(xbest)
-                    # Update the surrogate model
-                    sur_poi = update_surrogate(sur_poi, xbest, ybest)
+            # Perform Bayesian optimization iterations
+            print("Budget Counter: ")
+            for budget in 1:BUDGET
+                # Solve the acquisition function
+                xbest, fbest = poi_solver(sur_poi, lbs, ubs; initial_guesses=initial_guesses)
+                ybest = testfn.f(xbest)
+                # Update the surrogate model
+                sur_poi = update_surrogate(sur_poi, xbest, ybest)
 
-                    # Solve the acquisition function
-                    xbest, fbest = ei_solver(sur_ei, lbs, ubs; initial_guesses=initial_guesses)
-                    ybest = testfn.f(xbest)
-                    # Update the surrogate model
-                    sur_ei = update_surrogate(sur_ei, xbest, ybest)
-                    
-                    # Solve the acquisition function
-                    xbest, fbest = ucb_solver(sur_ucb, lbs, ubs; initial_guesses=initial_guesses)
-                    ybest = testfn.f(xbest)
-                    # Update the surrogate model
-                    sur_ucb = update_surrogate(sur_ucb, xbest, ybest)
+                # Solve the acquisition function
+                xbest, fbest = ei_solver(sur_ei, lbs, ubs; initial_guesses=initial_guesses)
+                ybest = testfn.f(xbest)
+                # Update the surrogate model
+                sur_ei = update_surrogate(sur_ei, xbest, ybest)
+                
+                # Solve the acquisition function
+                xbest, fbest = ucb_solver(sur_ucb, lbs, ubs; initial_guesses=initial_guesses)
+                ybest = testfn.f(xbest)
+                # Update the surrogate model
+                sur_ucb = update_surrogate(sur_ucb, xbest, ybest)
 
-                    if SHOULD_OPTIMIZE
-                        sur_poi = optimize_hypers_optim(sur_poi, kernel_matern52)
-                        sur_ei = optimize_hypers_optim(sur_ei, kernel_matern52)
-                        sur_ucb = optimize_hypers_optim(sur_ucb, kernel_matern52)
-                    end
-                    print("|")
+                if SHOULD_OPTIMIZE
+                    sur_poi = optimize_hypers_optim(sur_poi, kernel_matern52)
+                    sur_ei = optimize_hypers_optim(sur_ei, kernel_matern52)
+                    sur_ucb = optimize_hypers_optim(sur_ucb, kernel_matern52)
                 end
-                println()
-
-                # Compute the GAP of the surrogate model
-                fbest = testfn.f(testfn.xopt[1])
-                ei_gaps[trial, :] .= measure_gap(get_observations(sur_ei), fbest)
-                ucb_gaps[trial, :] .= measure_gap(get_observations(sur_ucb), fbest)
-                poi_gaps[trial, :] .= measure_gap(get_observations(sur_poi), fbest)
-            catch failure_error
-                msg = "($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS) failed with error: $(failure_error)"
-                self_filename, extension = splitext(basename(@__FILE__))
-                filename = DATA_DIRECTORY * "/" * self_filename * "/" * payload.name * "_failed.txt"
-                write_error_to_disk(filename, msg)
+                print("|")
             end
-        end
+            println()
 
-        for trial in 1:NUMBER_OF_TRIALS
+            # Compute the GAP of the surrogate model
+            fbest = testfn.f(testfn.xopt[1])
+            ei_gaps .= measure_gap(get_observations(sur_ei), fbest)
+            ucb_gaps .= measure_gap(get_observations(sur_ucb), fbest)
+            poi_gaps .= measure_gap(get_observations(sur_poi), fbest)
+
             # Write the GAP to disk
-            write_gap_to_csv(ei_gaps[trial, :], trial, ei_csv_file_path)
-            write_gap_to_csv(ucb_gaps[trial, :], trial, ucb_csv_file_path)
-            write_gap_to_csv(poi_gaps[trial, :], trial, poi_csv_file_path)
+            write_gap_to_csv(ei_gaps, trial, ei_csv_file_path)
+            write_gap_to_csv(ucb_gaps, trial, ucb_csv_file_path)
+            write_gap_to_csv(poi_gaps, trial, poi_csv_file_path)
 
-            # # Write the surrogate observations to disk
-            # write_observations_to_csv(sur_ei.X, get_observations(sur_ei), trial, ei_observation_csv_file_path)
-            # write_observations_to_csv(sur_ucb.X, get_observations(sur_ucb), trial, ucb_observation_csv_file_path)
-            # write_observations_to_csv(sur_poi.X, get_observations(sur_poi), trial, poi_observation_csv_file_path)
+            # Write the surrogate observations to disk
+            write_observations_to_csv(sur_ei.X, get_observations(sur_ei), trial, ei_observation_csv_file_path)
+            write_observations_to_csv(sur_ucb.X, get_observations(sur_ucb), trial, ucb_observation_csv_file_path)
+            write_observations_to_csv(sur_poi.X, get_observations(sur_poi), trial, poi_observation_csv_file_path)
+        catch failure_error
+            msg = "($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS) failed with error: $(failure_error)"
+            self_filename, extension = splitext(basename(@__FILE__))
+            filename = DATA_DIRECTORY * "/" * self_filename * "/" * payload.name * "_failed.txt"
+            write_error_to_disk(filename, msg)
         end
     end
 end
