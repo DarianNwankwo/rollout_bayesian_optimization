@@ -211,6 +211,11 @@ function ∇α(T::Trajectory)
     fmini = minimum(get_observations(T.s))
     best_ndx, best_step = best(T)
     xb, fb, ∇fb = best_step
+
+    if best_ndx == 1
+        return -∇fb
+    end
+
     if fmini <= fb
         return zeros(length(xb))
     end
