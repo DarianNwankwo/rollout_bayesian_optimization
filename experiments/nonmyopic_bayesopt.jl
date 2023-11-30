@@ -11,7 +11,7 @@ using SharedArrays
 using Distributed
 
 
-addprocs()
+addprocs(Sys.CPU_THREADS * 4)
 
 @everywhere include("../testfns.jl")
 @everywhere include("../rollout.jl")
