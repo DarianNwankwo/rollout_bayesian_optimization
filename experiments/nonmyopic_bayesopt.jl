@@ -1,27 +1,14 @@
 using ArgParse
-using Distributions
-using LinearAlgebra
-using Plots
-using Sobol
-using Random
-using CSV
-using DataFrames
-using Dates
-using SharedArrays
-using Distributed
-
-
-addprocs(Sys.CPU_THREADS * 4)
-
-@everywhere include("../testfns.jl")
-@everywhere include("../rollout.jl")
-@everywhere include("../utils.jl")
-
 
 function parse_command_line(args)
     parser = ArgParseSettings("Myopic Bayesian Optimization CLI")
 
     @add_arg_table! parser begin
+        "--nworkers"
+            action = :store_arg
+            help = "Number of workers to use"
+            default = Sys.CPU_THREADS
+            arg_type = Int
         "--seed"
             action = :store_arg
             help = "Seed for random number generation"
@@ -78,6 +65,26 @@ function parse_command_line(args)
     parsed_args = parse_args(args, parser)
     return parsed_args
 end
+
+cli_args = parse_command_line(ARGS)
+
+using Distributions
+using LinearAlgebra
+using Plots
+using Sobol
+using Random
+using CSV
+using DataFrames
+using Dates
+using SharedArrays
+using Distributed
+
+
+Distributed.addprocs(cli_args["nworkers"])
+
+@everywhere include("../testfns.jl")
+@everywhere include("../rollout.jl")
+@everywhere include("../utils.jl")
 
 
 function create_gap_csv_file(
@@ -192,8 +199,7 @@ function write_error_to_disk(filename::String, msg::String)
 end
 
 
-function main()
-    cli_args = parse_command_line(ARGS)
+function main(cli_args)
     Random.seed!(cli_args["seed"])
     BUDGET = cli_args["budget"]
     NUMBER_OF_TRIALS = cli_args["trials"]
@@ -351,4 +357,4 @@ function main()
     println("Completed")
 end
 
-main()
+main(cli_args)
