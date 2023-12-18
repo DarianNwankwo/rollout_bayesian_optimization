@@ -60,6 +60,9 @@ function parse_command_line(args)
             help = "Number of iterations for SGD (default: 25)"
             default = 25
             arg_type = Int
+        "--variance-reudction"
+            action = :store_true
+            help = "Use EI as a control variate for variance reduction"
     end
 
     parsed_args = parse_args(args, parser)
@@ -210,6 +213,9 @@ function main(cli_args)
     HORIZON = cli_args["horizon"]
     BATCH_SIZE = cli_args["batch-size"]
     SGD_ITERATIONS = cli_args["sgd-iterations"]
+    SHOULD_REDUCE_VARIANCE = if haskey(cli_args, "variance-reduction") cli_args["variance-reduction"] else false end
+    println("Should Reduce Variance: $(SHOULD_REDUCE_VARIANCE)")
+    return
 
     # Establish the synthetic functions we want to evaluate our algorithms on.
     testfn_payloads = Dict(
@@ -325,7 +331,8 @@ function main(cli_args)
                 xbest, fbest = distributed_rollout_solver(
                     sur=sur, tp=tp, xstarts=initial_guesses, batch=batch, max_iterations=SGD_ITERATIONS,
                     candidate_locations=candidate_locations, candidate_values=candidate_values,
-                    αxs=αxs, ∇αxs=∇αxs, final_locations=final_locations, final_evaluations=final_evaluations
+                    αxs=αxs, ∇αxs=∇αxs, final_locations=final_locations, final_evaluations=final_evaluations,
+                    varred=SHOULD_REDUCE_VARIANCE
                 )
                 ybest = testfn.f(xbest)
                 # Update the surrogate model
