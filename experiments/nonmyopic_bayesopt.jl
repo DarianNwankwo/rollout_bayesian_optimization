@@ -214,8 +214,6 @@ function main(cli_args)
     BATCH_SIZE = cli_args["batch-size"]
     SGD_ITERATIONS = cli_args["sgd-iterations"]
     SHOULD_REDUCE_VARIANCE = if haskey(cli_args, "variance-reduction") cli_args["variance-reduction"] else false end
-    println("Should Reduce Variance: $(SHOULD_REDUCE_VARIANCE)")
-    return
 
     # Establish the synthetic functions we want to evaluate our algorithms on.
     testfn_payloads = Dict(
