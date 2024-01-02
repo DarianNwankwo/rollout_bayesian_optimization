@@ -30,7 +30,7 @@ function parse_command_line(args)
         "--budget"
             action = :store_arg
             help = "Maximum budget for bayesian optimization (default: 20)"
-            default = 15
+            default = 20
             arg_type = Int
         "--output-dir"
             action = :store_arg
@@ -159,6 +159,42 @@ function create_gap_csv_file(
     )
 
     return path_to_csv_file
+end
+
+
+function write_metadata_to_file(cli_args)
+    # Extract the parameters from the command-line arguments
+    budget = cli_args["budget"]
+    number_of_trials = cli_args["trials"]
+    number_of_starts = cli_args["starts"]
+    data_directory = cli_args["output-dir"]
+    should_optimize = haskey(cli_args, "optimize") ? cli_args["optimize"] : false
+    horizon = cli_args["horizon"]
+    mc_samples = cli_args["mc-samples"] * (horizon + 1)
+    batch_size = cli_args["batch-size"]
+    sgd_iterations = cli_args["sgd-iterations"]
+    should_reduce_variance = haskey(cli_args, "variance-reduction") ? cli_args["variance-reduction"] : false
+
+    # Get directory for experiment
+    self_filename, extension = splitext(basename(@__FILE__))
+    final_directory = data_directory * "/" * self_filename
+
+    # Define the file path
+    file_path = joinpath(final_directory, "metadata.txt")
+
+    # Open the file and write the metadata
+    open(file_path, "w") do file
+        println(file, "Budget: ", budget)
+        println(file, "Number of Trials: ", number_of_trials)
+        println(file, "Number of Starts: ", number_of_starts)
+        println(file, "Data Directory: ", data_directory)
+        println(file, "Should Optimize: ", should_optimize)
+        println(file, "Horizon: ", horizon)
+        println(file, "MC Samples: ", mc_samples)
+        println(file, "Batch Size: ", batch_size)
+        println(file, "SGD Iterations: ", sgd_iterations)
+        println(file, "Should Reduce Variance: ", should_reduce_variance)
+    end
 end
 
 
@@ -350,6 +386,9 @@ function main(cli_args)
 
     # Create the CSV for the current test function being evaluated
     rollout_time_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_times.csv", BUDGET)
+    
+    # Write the metadata to disk
+    write_metadata_to_file(cli_args)
 
     # Initialize the trajectory parameters
     tp = TrajectoryParameters(

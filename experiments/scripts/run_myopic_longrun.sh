@@ -42,5 +42,5 @@ myopic_configurations=(
 )
 
 for config in "${myopic_configurations[@]}"; do
-  julia ../timed_myopic_bo.jl $config
+  julia ../myopic_bayesopt.jl $config
 done

@@ -342,6 +342,32 @@ function write_error_to_disk(filename::String, msg::String)
 end
 
 
+function write_metadata_to_file(cli_args)
+    # Extract the parameters from the command-line arguments
+    budget = cli_args["budget"]
+    number_of_trials = cli_args["trials"]
+    number_of_starts = cli_args["starts"]
+    data_directory = cli_args["output-dir"]
+    should_optimize = haskey(cli_args, "optimize") ? cli_args["optimize"] : false
+
+    # Get directory for experiment
+    self_filename, extension = splitext(basename(@__FILE__))
+    final_directory = data_directory * "/" * self_filename
+
+    # Define the file path
+    file_path = joinpath(final_directory, "metadata.txt")
+
+    # Open the file and write the metadata
+    open(file_path, "w") do file
+        println(file, "Budget: ", budget)
+        println(file, "Number of Trials: ", number_of_trials)
+        println(file, "Number of Starts: ", number_of_starts)
+        println(file, "Data Directory: ", data_directory)
+        println(file, "Should Optimize: ", should_optimize)
+    end
+end
+
+
 function main()
     cli_args = parse_command_line(ARGS)
     Random.seed!(2024)
@@ -440,6 +466,9 @@ function main()
     poi_observation_csv_file_path = create_observation_csv_file(
         DATA_DIRECTORY, payload.name, "poi_observations.csv", BUDGET
     )
+
+    # Write the metadata to disk
+    write_metadata_to_file(cli_args)
 
     # Variable for holding time elapsed during acquisition solve
     time_elapsed = 0.
