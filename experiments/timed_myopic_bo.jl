@@ -69,37 +69,11 @@ function create_time_csv_file(
     CSV.write(
         path_to_csv_file,
         DataFrame(
-            -ones(1, budget + 2),
-            Symbol.(col_names)
-        )    
-    )
-
-    return path_to_csv_file
-end
-
-
-function create_observation_csv_file(
-    parent_directory::String,
-    child_directory::String,
-    csv_filename::String,
-    budget::Int
-    )
-    # Get directory for experiment
-    self_filename, extension = splitext(basename(@__FILE__))
-    dir_name = parent_directory * "/" * self_filename * "/" * child_directory
-    
-    # Write the header to the csv file
-    path_to_csv_file = dir_name * "/" * csv_filename
-    col_names = vcat(["trial"], ["observation_pair_$i" for i in 1:budget])
-
-    CSV.write(
-        path_to_csv_file,
-        DataFrame(
             -ones(1, budget + 1),
             Symbol.(col_names)
         )    
     )
-    
+
     return path_to_csv_file
 end
 
@@ -115,27 +89,6 @@ function write_time_to_csv(
         Tables.table(
             hcat([trial_number times'])
         ),
-        append=true,
-    )
-
-    return nothing
-end
-
-
-function write_observations_to_csv(
-    X::Matrix{T},
-    y::Vector{T},
-    trial_number::Int,
-    path_to_csv_file::String
-    ) where T <: Number
-    # Write observations to csv
-    d, N = size(X)
-    X = hcat(trial_number * ones(d, 1), X)
-    X = vcat(X, [trial_number y'])
-    
-    CSV.write(
-        path_to_csv_file,
-        Tables.table(X),
         append=true,
     )
 
@@ -347,9 +300,9 @@ function main()
     poi_times = zeros(BUDGET)
 
     # Create the CSV for the current test function being evaluated
-    ei_csv_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "ei_times.csv", BUDGET)
-    ucb_csv_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "ucb_times.csv", BUDGET)
-    poi_csv_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "poi_times.csv", BUDGET)
+    ei_time_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "ei_times.csv", BUDGET)
+    ucb_time_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "ucb_times.csv", BUDGET)
+    poi_time_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "poi_times.csv", BUDGET)
 
     # Variable for holding time elapsed during acquisition solve
     time_elapsed = 0.
@@ -406,10 +359,10 @@ function main()
             # Compute the GAP of the surrogate model
             fbest = testfn.f(testfn.xopt[1])
 
-            # Write the GAP to disk
-            write_time_to_csv(ei_times, trial, ei_csv_file_path)
-            write_time_to_csv(ucb_times, trial, ucb_csv_file_path)
-            write_time_to_csv(poi_times, trial, poi_csv_file_path)
+            # Write the time to disk
+            write_time_to_csv(ei_times, trial, ei_time_file_path)
+            write_time_to_csv(ucb_times, trial, ucb_time_file_path)
+            write_time_to_csv(poi_times, trial, poi_time_file_path)
         catch failure_error
             msg = "($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS) failed with error: $(failure_error)"
             self_filename, extension = splitext(basename(@__FILE__))

@@ -90,7 +90,7 @@ Distributed.addprocs(cli_args["nworkers"])
 @everywhere include("../utils.jl")
 
 
-function create_gap_csv_file(
+function create_time_csv_file(
     parent_directory::String,
     child_directory::String,
     csv_filename::String,
@@ -108,43 +108,17 @@ function create_gap_csv_file(
     CSV.write(
         path_to_csv_file,
         DataFrame(
-            -ones(1, budget + 2),
-            Symbol.(col_names)
-        )    
-    )
-
-    return path_to_csv_file
-end
-
-
-function create_observation_csv_file(
-    parent_directory::String,
-    child_directory::String,
-    csv_filename::String,
-    budget::Int
-    )
-    # Get directory for experiment
-    self_filename, extension = splitext(basename(@__FILE__))
-    dir_name = parent_directory * "/" * self_filename * "/" * child_directory
-    
-    # Write the header to the csv file
-    path_to_csv_file = dir_name * "/" * csv_filename
-    col_names = vcat(["trial"], ["observation_pair_$i" for i in 1:budget])
-
-    CSV.write(
-        path_to_csv_file,
-        DataFrame(
             -ones(1, budget + 1),
             Symbol.(col_names)
         )    
     )
-    
+
     return path_to_csv_file
 end
 
 
-function write_gap_to_csv(
-    gaps::Vector{T},
+function write_time_to_csv(
+    times::Vector{T},
     trial_number::Int,
     path_to_csv_file::String
     ) where T <: Number
@@ -152,29 +126,8 @@ function write_gap_to_csv(
     CSV.write(
         path_to_csv_file,
         Tables.table(
-            hcat([trial_number gaps'])
+            hcat([trial_number times'])
         ),
-        append=true,
-    )
-
-    return nothing
-end
-
-
-function write_observations_to_csv(
-    X::Matrix{T},
-    y::Vector{T},
-    trial_number::Int,
-    path_to_csv_file::String
-    ) where T <: Number
-    # Write observations to csv
-    d, N = size(X)
-    X = hcat(trial_number * ones(d, 1), X)
-    X = vcat(X, [trial_number y'])
-    
-    CSV.write(
-        path_to_csv_file,
-        Tables.table(X),
         append=true,
     )
 
@@ -278,16 +231,10 @@ function main(cli_args)
     initial_samples = randsample(NUMBER_OF_TRIALS, testfn.dim, lbs, ubs)
 
     # Allocate space for GAPS
-    rollout_gaps = zeros(BUDGET + 1)
-    # rollout_observations = Vector{Matrix{Float64}}(undef, NUMBER_OF_TRIALS)
+    rollout_times = zeros(BUDGET)
 
     # Create the CSV for the current test function being evaluated
-    rollout_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_gaps.csv", BUDGET)
-
-    # Create the CSV for the current test function being evaluated observations
-    rollout_observation_csv_file_path = create_observation_csv_file(
-        DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_observations.csv", BUDGET
-    )
+    rollout_time_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_times.csv", BUDGET)
 
     # Initialize the trajectory parameters
     tp = TrajectoryParameters(
@@ -310,6 +257,12 @@ function main(cli_args)
     final_locations = SharedMatrix{Float64}(length(tp.x0), size(batch, 2))
     final_evaluations = SharedArray{Float64}(size(batch, 2))
 
+    # Allocate space for rollout times
+    rollout_times = zeros(BUDGET)
+
+    # Variable for holdingt ime elapsed during acquisitions solve
+    time_elapsed=  0.
+
     for trial in 1:NUMBER_OF_TRIALS
         try
             println("($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS)...")
@@ -322,19 +275,18 @@ function main(cli_args)
             print("Budget Counter: ")
             for budget in 1:BUDGET
                 # Solve the acquisition function
-                # xbest, fbest = rollout_solver(
-                #     sur=sur, tp=tp, xstarts=initial_guesses, batch=batch, max_iterations=SGD_ITERATIONS,
-                #     candidate_locations=candidate_locations, candidate_values=candidate_values
-                # )
+                time_elapsed=  @elapsed begin
                 xbest, fbest = distributed_rollout_solver(
                     sur=sur, tp=tp, xstarts=initial_guesses, batch=batch, max_iterations=SGD_ITERATIONS,
                     candidate_locations=candidate_locations, candidate_values=candidate_values,
                     αxs=αxs, ∇αxs=∇αxs, final_locations=final_locations, final_evaluations=final_evaluations,
                     varred=SHOULD_REDUCE_VARIANCE
                 )
+                end
                 ybest = testfn.f(xbest)
                 # Update the surrogate model
                 sur = update_surrogate(sur, xbest, ybest)
+                rollout_times[budget] = time_elapsed
 
                 if SHOULD_OPTIMIZE
                     sur = optimize_hypers_optim(sur, kernel_matern52)
@@ -345,12 +297,9 @@ function main(cli_args)
             
             # Compute the GAP of the surrogate model
             fbest = testfn.f(testfn.xopt[1])
-            rollout_gaps[:] .= measure_gap(get_observations(sur), fbest)
 
-            # Write the GAP to disk
-            write_gap_to_csv(rollout_gaps, trial, rollout_csv_file_path)
-            # Write the surrogate observations to disk
-            write_observations_to_csv(sur.X, get_observations(sur), trial, rollout_observation_csv_file_path)
+            # Write the time to disk
+            write_time_to_csv(rollout_times, trial, rollout_time_file_path)
         catch failure_error
             msg = "($(payload.name)) Trial $(trial) failed with error: $(failure_error)"
             self_filename, extension = splitext(basename(@__FILE__))

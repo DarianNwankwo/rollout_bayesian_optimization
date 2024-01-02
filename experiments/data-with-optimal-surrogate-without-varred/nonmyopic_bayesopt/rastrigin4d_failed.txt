@@ -1,0 +1,1 @@
+(rastrigin4d) Trial 54 failed with error: CompositeException(Any[TaskFailedException(Task (failed) @0x00007f995be09140)])

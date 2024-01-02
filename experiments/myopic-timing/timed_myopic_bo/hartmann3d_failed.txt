@@ -1,0 +1,1 @@
+(hartmann3d) Trial 39 of 60 failed with error: AssertionError("isfinite(phi_c) && isfinite(dphi_c)")
