@@ -19,17 +19,17 @@ function parse_command_line(args)
             help = "If set, the surrogate's hyperparameters will be optimized"
         "--starts"
             action = :store_arg
-            help = "Number of random starts for inner policy optimization (default: 16)"
+            help = "Number of random starts for inner policy optimization (default: 8)"
             default = 8
             arg_type = Int
         "--trials"
             action = :store_arg
-            help = "Number of trials with a different initial start (default: 50)"
-            default = 50
+            help = "Number of trials with a different initial start (default: 60)"
+            default = 60
             arg_type = Int
         "--budget"
             action = :store_arg
-            help = "Maximum budget for bayesian optimization (default: 15)"
+            help = "Maximum budget for bayesian optimization (default: 20)"
             default = 15
             arg_type = Int
         "--output-dir"
@@ -38,8 +38,8 @@ function parse_command_line(args)
             required = true
         "--mc-samples"
             action = :store_arg
-            help = "Number of Monte Carlo samples for the acquisition function (default: 25)"
-            default = 25
+            help = "Number of Monte Carlo samples for the acquisition function (default: 50 * Horizon)"
+            default = 50
             arg_type = Int
         "--horizon"
             action = :store_arg
@@ -57,10 +57,10 @@ function parse_command_line(args)
             required = true
         "--sgd-iterations"
             action = :store_arg
-            help = "Number of iterations for SGD (default: 25)"
-            default = 25
+            help = "Number of iterations for SGD (default: 50)"
+            default = 50
             arg_type = Int
-        "--variance-reudction"
+        "--variance-reduction"
             action = :store_true
             help = "Use EI as a control variate for variance reduction"
     end
@@ -88,6 +88,51 @@ Distributed.addprocs(cli_args["nworkers"])
 @everywhere include("../testfns.jl")
 @everywhere include("../rollout.jl")
 @everywhere include("../utils.jl")
+
+
+function create_time_csv_file(
+    parent_directory::String,
+    child_directory::String,
+    csv_filename::String,
+    budget::Int
+    )
+    # Create directory for finished experiment
+    self_filename, extension = splitext(basename(@__FILE__))
+    dir_name = parent_directory * "/" * self_filename * "/" * child_directory
+    mkpath(dir_name)
+
+    # Write the header to the csv file
+    path_to_csv_file = dir_name * "/" * csv_filename
+    col_names = vcat(["trial"], ["$i" for i in 1:budget])
+
+    CSV.write(
+        path_to_csv_file,
+        DataFrame(
+            -ones(1, budget + 1),
+            Symbol.(col_names)
+        )    
+    )
+
+    return path_to_csv_file
+end
+
+
+function write_time_to_csv(
+    times::Vector{T},
+    trial_number::Int,
+    path_to_csv_file::String
+    ) where T <: Number
+    # Write gap to csv
+    CSV.write(
+        path_to_csv_file,
+        Tables.table(
+            hcat([trial_number times'])
+        ),
+        append=true,
+    )
+
+    return nothing
+end
 
 
 function create_gap_csv_file(
@@ -209,8 +254,8 @@ function main(cli_args)
     NUMBER_OF_STARTS = cli_args["starts"]
     DATA_DIRECTORY = cli_args["output-dir"]
     SHOULD_OPTIMIZE = if haskey(cli_args, "optimize") cli_args["optimize"] else false end
-    MC_SAMPLES = cli_args["mc-samples"]
     HORIZON = cli_args["horizon"]
+    MC_SAMPLES = cli_args["mc-samples"] * (HORIZON + 1)
     BATCH_SIZE = cli_args["batch-size"]
     SGD_ITERATIONS = cli_args["sgd-iterations"]
     SHOULD_REDUCE_VARIANCE = if haskey(cli_args, "variance-reduction") cli_args["variance-reduction"] else false end
@@ -265,6 +310,17 @@ function main(cli_args)
     # Build the test function object
     payload = testfn_payloads[cli_args["function-name"]]
     println("Running experiment for $(payload.name).")
+    println("Configuration: ")
+    println("    Budget: $(BUDGET)")
+    println("    Number of trials: $(NUMBER_OF_TRIALS)")
+    println("    Number of starts: $(NUMBER_OF_STARTS)")
+    println("    Output directory: $(DATA_DIRECTORY)")
+    println("    Optimize hyperparameters: $(SHOULD_OPTIMIZE)")
+    println("    Horizon: $(HORIZON)")
+    println("    Monte Carlo samples: $(MC_SAMPLES)")
+    println("    Batch size: $(BATCH_SIZE)")
+    println("    SGD iterations: $(SGD_ITERATIONS)")
+    println("    Variance reduction: $(SHOULD_REDUCE_VARIANCE)")
     testfn = payload.fn(payload.args...)
     lbs, ubs = testfn.bounds[:,1], testfn.bounds[:,2]
 
@@ -281,6 +337,9 @@ function main(cli_args)
     rollout_gaps = zeros(BUDGET + 1)
     # rollout_observations = Vector{Matrix{Float64}}(undef, NUMBER_OF_TRIALS)
 
+    # Allocate space for times
+    rollout_times = zeros(NUMBER_OF_TRIALS)
+
     # Create the CSV for the current test function being evaluated
     rollout_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_gaps.csv", BUDGET)
 
@@ -288,6 +347,9 @@ function main(cli_args)
     rollout_observation_csv_file_path = create_observation_csv_file(
         DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_observations.csv", BUDGET
     )
+
+    # Create the CSV for the current test function being evaluated
+    rollout_time_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_times.csv", BUDGET)
 
     # Initialize the trajectory parameters
     tp = TrajectoryParameters(
@@ -310,6 +372,9 @@ function main(cli_args)
     final_locations = SharedMatrix{Float64}(length(tp.x0), size(batch, 2))
     final_evaluations = SharedArray{Float64}(size(batch, 2))
 
+    # Variable for holding time elapsed during acquisition solve
+    time_elapsed = 0.
+
     for trial in 1:NUMBER_OF_TRIALS
         try
             println("($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS)...")
@@ -322,19 +387,18 @@ function main(cli_args)
             print("Budget Counter: ")
             for budget in 1:BUDGET
                 # Solve the acquisition function
-                # xbest, fbest = rollout_solver(
-                #     sur=sur, tp=tp, xstarts=initial_guesses, batch=batch, max_iterations=SGD_ITERATIONS,
-                #     candidate_locations=candidate_locations, candidate_values=candidate_values
-                # )
+                time_elapsed = @elapsed begin
                 xbest, fbest = distributed_rollout_solver(
                     sur=sur, tp=tp, xstarts=initial_guesses, batch=batch, max_iterations=SGD_ITERATIONS,
                     candidate_locations=candidate_locations, candidate_values=candidate_values,
                     αxs=αxs, ∇αxs=∇αxs, final_locations=final_locations, final_evaluations=final_evaluations,
                     varred=SHOULD_REDUCE_VARIANCE
                 )
+                end
                 ybest = testfn.f(xbest)
                 # Update the surrogate model
                 sur = update_surrogate(sur, xbest, ybest)
+                rollout_times[budget] = time_elapsed
 
                 if SHOULD_OPTIMIZE
                     sur = optimize_hypers_optim(sur, kernel_matern52)
@@ -346,6 +410,9 @@ function main(cli_args)
             # Compute the GAP of the surrogate model
             fbest = testfn.f(testfn.xopt[1])
             rollout_gaps[:] .= measure_gap(get_observations(sur), fbest)
+
+            # Write the time to disk
+            write_time_to_csv(rollout_times, trial, rollout_time_file_path)
 
             # Write the GAP to disk
             write_gap_to_csv(rollout_gaps, trial, rollout_csv_file_path)

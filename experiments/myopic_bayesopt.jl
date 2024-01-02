@@ -29,12 +29,12 @@ function parse_command_line(args)
         "--trials"
             action = :store_arg
             help = "Number of trials with a different initial start (default: 50)"
-            default = 50
+            default = 60
             arg_type = Int
         "--budget"
             action = :store_arg
             help = "Maximum budget for bayesian optimization (default: 15)"
-            default = 15
+            default = 20
             arg_type = Int
         "--output-dir"
             action = :store_arg
@@ -48,6 +48,51 @@ function parse_command_line(args)
 
     parsed_args = parse_args(args, parser)
     return parsed_args
+end
+
+
+function create_time_csv_file(
+    parent_directory::String,
+    child_directory::String,
+    csv_filename::String,
+    budget::Int
+    )
+    # Create directory for finished experiment
+    self_filename, extension = splitext(basename(@__FILE__))
+    dir_name = parent_directory * "/" * self_filename * "/" * child_directory
+    mkpath(dir_name)
+
+    # Write the header to the csv file
+    path_to_csv_file = dir_name * "/" * csv_filename
+    col_names = vcat(["trial"], ["$i" for i in 1:budget])
+
+    CSV.write(
+        path_to_csv_file,
+        DataFrame(
+            -ones(1, budget + 1),
+            Symbol.(col_names)
+        )    
+    )
+
+    return path_to_csv_file
+end
+
+
+function write_time_to_csv(
+    times::Vector{T},
+    trial_number::Int,
+    path_to_csv_file::String
+    ) where T <: Number
+    # Write gap to csv
+    CSV.write(
+        path_to_csv_file,
+        Tables.table(
+            hcat([trial_number times'])
+        ),
+        append=true,
+    )
+
+    return nothing
 end
 
 
@@ -370,10 +415,20 @@ function main()
     ucb_gaps = zeros(BUDGET + 1)
     poi_gaps = zeros(BUDGET + 1)
 
+    # Allocate space for timing information
+    ei_times = zeros(BUDGET)
+    ucb_times = zeros(BUDGET)
+    poi_times = zeros(BUDGET)
+
     # Create the CSV for the current test function being evaluated
     ei_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "ei_gaps.csv", BUDGET)
     ucb_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "ucb_gaps.csv", BUDGET)
     poi_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "poi_gaps.csv", BUDGET)
+
+    # Create the CSV for the current test function being evaluated
+    ei_time_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "ei_times.csv", BUDGET)
+    ucb_time_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "ucb_times.csv", BUDGET)
+    poi_time_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "poi_times.csv", BUDGET)
 
     # Create the CSV for the current test function being evaluated observations
     ei_observation_csv_file_path = create_observation_csv_file(
@@ -385,6 +440,9 @@ function main()
     poi_observation_csv_file_path = create_observation_csv_file(
         DATA_DIRECTORY, payload.name, "poi_observations.csv", BUDGET
     )
+
+    # Variable for holding time elapsed during acquisition solve
+    time_elapsed = 0.
 
     for trial in 1:NUMBER_OF_TRIALS
         try
@@ -400,22 +458,31 @@ function main()
             print("Budget Counter: ")
             for budget in 1:BUDGET
                 # Solve the acquisition function
+                time_elapsed = @elapsed begin
                 xbest, fbest = poi_solver(sur_poi, lbs, ubs; initial_guesses=initial_guesses)
+                end
                 ybest = testfn.f(xbest)
                 # Update the surrogate model
                 sur_poi = update_surrogate(sur_poi, xbest, ybest)
+                poi_times[budget] = time_elapsed
 
                 # Solve the acquisition function
+                time_elapsed = @elapsed begin
                 xbest, fbest = ei_solver(sur_ei, lbs, ubs; initial_guesses=initial_guesses)
+                end
                 ybest = testfn.f(xbest)
                 # Update the surrogate model
                 sur_ei = update_surrogate(sur_ei, xbest, ybest)
+                ei_times[budget] = time_elapsed
                 
                 # Solve the acquisition function
+                time_elapsed = @elapsed begin
                 xbest, fbest = ucb_solver(sur_ucb, lbs, ubs; initial_guesses=initial_guesses)
+                end
                 ybest = testfn.f(xbest)
                 # Update the surrogate model
                 sur_ucb = update_surrogate(sur_ucb, xbest, ybest)
+                ucb_times[budget] = time_elapsed
 
                 if SHOULD_OPTIMIZE
                     sur_poi = optimize_hypers_optim(sur_poi, kernel_matern52)
@@ -431,6 +498,11 @@ function main()
             ei_gaps .= measure_gap(get_observations(sur_ei), fbest)
             ucb_gaps .= measure_gap(get_observations(sur_ucb), fbest)
             poi_gaps .= measure_gap(get_observations(sur_poi), fbest)
+
+            # Write the time to disk
+            write_time_to_csv(ei_times, trial, ei_time_file_path)
+            write_time_to_csv(ucb_times, trial, ucb_time_file_path)
+            write_time_to_csv(poi_times, trial, poi_time_file_path)
 
             # Write the GAP to disk
             write_gap_to_csv(ei_gaps, trial, ei_csv_file_path)
