@@ -310,7 +310,7 @@ function main()
     testfn_payloads = Dict(
         "gramacylee" => (name="gramacylee", fn=TestGramacyLee, args=()),
         "rastrigin1d" => (name="rastrigin1d", fn=TestRastrigin, args=(1)),
-        "rastrigi4d" => (name="rastrigin4d", fn=TestRastrigin, args=(4)),
+        "rastrigin4d" => (name="rastrigin4d", fn=TestRastrigin, args=(4)),
         "ackley1d" => (name="ackley1d", fn=TestAckley, args=(1)),
         "ackley2d" => (name="ackley2d", fn=TestAckley, args=(2)),
         "ackley3d" => (name="ackley3d", fn=TestAckley, args=(3)),

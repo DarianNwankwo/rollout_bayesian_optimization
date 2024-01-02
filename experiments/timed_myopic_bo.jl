@@ -51,31 +51,7 @@ function parse_command_line(args)
 end
 
 
-function measure_gap(observations::Vector{T}, fbest::T) where T <: Number
-    ϵ = 1e-8
-    initial_minimum = observations[1]
-    subsequent_minimums = [
-        minimum(observations[1:j]) for j in 1:length(observations)
-    ]
-    numerator = initial_minimum .- subsequent_minimums
-    
-    if abs(fbest - initial_minimum) < ϵ
-        return 1. 
-    end
-    
-    denominator = initial_minimum - fbest
-    result = numerator ./ denominator
-
-    for i in 1:length(result)
-        if result[i] < ϵ
-            result[i] = 0
-        end
-    end
-
-    return result
-end
-
-function create_gap_csv_file(
+function create_time_csv_file(
     parent_directory::String,
     child_directory::String,
     csv_filename::String,
@@ -366,14 +342,14 @@ function main()
     initial_samples = randsample(NUMBER_OF_TRIALS, testfn.dim, lbs, ubs)
 
     # Allocate space for time evaluations
-    ei_times = zeros(BUDGET + 1)
-    ucb_times = zeros(BUDGET + 1)
-    poi_times = zeros(BUDGET + 1)
+    ei_times = zeros(BUDGET)
+    ucb_times = zeros(BUDGET)
+    poi_times = zeros(BUDGET)
 
     # Create the CSV for the current test function being evaluated
-    ei_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "ei_times.csv", BUDGET)
-    ucb_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "ucb_times.csv", BUDGET)
-    poi_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "poi_times.csv", BUDGET)
+    ei_csv_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "ei_times.csv", BUDGET)
+    ucb_csv_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "ucb_times.csv", BUDGET)
+    poi_csv_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "poi_times.csv", BUDGET)
 
     # Variable for holding time elapsed during acquisition solve
     time_elapsed = 0.
