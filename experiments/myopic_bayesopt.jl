@@ -1,23 +1,20 @@
 using ArgParse
-using Distributions
-using LinearAlgebra
-using Plots
-using Sobol
-using Random
-using CSV
-using DataFrames
-using Dates
-
-
-include("../testfns.jl")
-include("../rollout.jl")
-include("../utils.jl")
 
 
 function parse_command_line(args)
     parser = ArgParseSettings("Myopic Bayesian Optimization CLI")
 
     @add_arg_table! parser begin
+        "--nworkers"
+            action = :store_arg
+            help = "Number of workers to use for parallelization"
+            default = Sys.CPU_THREADS
+            arg_type = Int
+        "--seed"
+            action = :store_arg
+            help = "Seed for random number generation"
+            default = 1906
+            arg_type = Int
         "--optimize"
             action = :store_true
             help = "If set, the surrogate's hyperparameters will be optimized"
@@ -29,7 +26,7 @@ function parse_command_line(args)
         "--trials"
             action = :store_arg
             help = "Number of trials with a different initial start (default: 50)"
-            default = 60
+            default = 30
             arg_type = Int
         "--budget"
             action = :store_arg
@@ -49,6 +46,28 @@ function parse_command_line(args)
     parsed_args = parse_args(args, parser)
     return parsed_args
 end
+
+
+cli_args = parse_command_line(ARGS)
+
+
+using Distributions
+using LinearAlgebra
+using Plots
+using Sobol
+using Random
+using CSV
+using DataFrames
+using Dates
+using Distributed
+
+
+@everywhere include("../testfns.jl")
+@everywhere include("../rollout.jl")
+@everywhere include("../utils.jl")
+
+
+Distributed.addprocs(cli_args["nworkers"])
 
 
 function create_time_csv_file(
@@ -313,6 +332,11 @@ function ucb_solver(s::RBFsurrogate, lbs, ubs; initial_guesses, β=3., max_itera
 end
 
 
+function random_solver(lbs, ubs)
+    return vec(randsample(1, length(lbs), lbs, ubs))
+end
+
+
 function generate_initial_guesses(N::Int, lbs::Vector{T}, ubs::Vector{T},) where T <: Number
     ϵ = 1e-6
     seq = SobolSeq(lbs, ubs)
@@ -335,7 +359,7 @@ end
 
 function write_error_to_disk(filename::String, msg::String)
     # Open a text file in write mode
-    open(filename, "w") do file
+    open(filename, "a+") do file
         # Write a string to the file
         write(file, msg)
     end
@@ -370,7 +394,7 @@ end
 
 function main()
     cli_args = parse_command_line(ARGS)
-    Random.seed!(2024)
+    Random.seed!(1906)
     BUDGET = cli_args["budget"]
     NUMBER_OF_TRIALS = cli_args["trials"]
     NUMBER_OF_STARTS = cli_args["starts"]
@@ -418,6 +442,10 @@ function main()
         "hartmann6d" => (name="hartmann6d", fn=TestHartmann6D, args=()),
         "hartmann4d" => (name="hartmann4d", fn=TestHartmann4D, args=()),
         "hartmann3d" => (name="hartmann3d", fn=TestHartmann3D, args=()),
+        "bohachevsky" => (name="bohachevsky", fn=TestBohachevsky, args=()),
+        "griewank3d" => (name="griewank3d", fn=TestGriewank, args=(3)),
+        "shekel4d" => (name="shekel4d", fn=TestShekel, args=()),
+        "dropwave" => (name="dropwave", fn=TestDropWave, args=()),
     )
 
     # Gaussian process hyperparameters
@@ -440,21 +468,25 @@ function main()
     ei_gaps = zeros(BUDGET + 1)
     ucb_gaps = zeros(BUDGET + 1)
     poi_gaps = zeros(BUDGET + 1)
+    random_gaps = zeros(BUDGET + 1)
 
     # Allocate space for timing information
     ei_times = zeros(BUDGET)
     ucb_times = zeros(BUDGET)
     poi_times = zeros(BUDGET)
+    random_times = zeros(BUDGET)
 
     # Create the CSV for the current test function being evaluated
     ei_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "ei_gaps.csv", BUDGET)
     ucb_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "ucb_gaps.csv", BUDGET)
     poi_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "poi_gaps.csv", BUDGET)
+    random_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "random_gaps.csv", BUDGET)
 
     # Create the CSV for the current test function being evaluated
     ei_time_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "ei_times.csv", BUDGET)
     ucb_time_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "ucb_times.csv", BUDGET)
     poi_time_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "poi_times.csv", BUDGET)
+    random_time_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "random_times.csv", BUDGET)
 
     # Create the CSV for the current test function being evaluated observations
     ei_observation_csv_file_path = create_observation_csv_file(
@@ -465,6 +497,9 @@ function main()
     )
     poi_observation_csv_file_path = create_observation_csv_file(
         DATA_DIRECTORY, payload.name, "poi_observations.csv", BUDGET
+    )
+    random_observations_csv_file_path = create_observation_csv_file(
+        DATA_DIRECTORY, payload.name, "random_observations.csv", BUDGET
     )
 
     # Write the metadata to disk
@@ -482,11 +517,12 @@ function main()
             sur_ei = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
             sur_poi = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
             sur_ucb = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
+            sur_random = fit_surrogate(ψ, Xinit, yinit; σn2=σn2)
 
             # Perform Bayesian optimization iterations
             print("Budget Counter: ")
             for budget in 1:BUDGET
-                # Solve the acquisition function
+                # Solve the acquisition function for Probability of Improvement
                 time_elapsed = @elapsed begin
                 xbest, fbest = poi_solver(sur_poi, lbs, ubs; initial_guesses=initial_guesses)
                 end
@@ -495,7 +531,7 @@ function main()
                 sur_poi = update_surrogate(sur_poi, xbest, ybest)
                 poi_times[budget] = time_elapsed
 
-                # Solve the acquisition function
+                # Solve the acquisition function for Expected Improvement 
                 time_elapsed = @elapsed begin
                 xbest, fbest = ei_solver(sur_ei, lbs, ubs; initial_guesses=initial_guesses)
                 end
@@ -504,7 +540,7 @@ function main()
                 sur_ei = update_surrogate(sur_ei, xbest, ybest)
                 ei_times[budget] = time_elapsed
                 
-                # Solve the acquisition function
+                # Solve the acquisition function for Upper Confidence Bound
                 time_elapsed = @elapsed begin
                 xbest, fbest = ucb_solver(sur_ucb, lbs, ubs; initial_guesses=initial_guesses)
                 end
@@ -513,10 +549,20 @@ function main()
                 sur_ucb = update_surrogate(sur_ucb, xbest, ybest)
                 ucb_times[budget] = time_elapsed
 
+                # Solve the acquisition function for Random
+                time_elapsed = @elapsed begin
+                xbest = random_solver(lbs, ubs)
+                end
+                ybest = testfn.f(xbest)
+                # Update the surrogate model
+                sur_random = update_surrogate(sur_random, xbest, ybest)
+                random_times[budget] = time_elapsed
+
                 if SHOULD_OPTIMIZE
                     sur_poi = optimize_hypers_optim(sur_poi, kernel_matern52)
                     sur_ei = optimize_hypers_optim(sur_ei, kernel_matern52)
                     sur_ucb = optimize_hypers_optim(sur_ucb, kernel_matern52)
+                    sur_random = optimize_hypers_optim(sur_random, kernel_matern52)
                 end
                 print("|")
             end
@@ -527,23 +573,27 @@ function main()
             ei_gaps .= measure_gap(get_observations(sur_ei), fbest)
             ucb_gaps .= measure_gap(get_observations(sur_ucb), fbest)
             poi_gaps .= measure_gap(get_observations(sur_poi), fbest)
+            random_gaps .= measure_gap(get_observations(sur_random), fbest)
 
             # Write the time to disk
             write_time_to_csv(ei_times, trial, ei_time_file_path)
             write_time_to_csv(ucb_times, trial, ucb_time_file_path)
             write_time_to_csv(poi_times, trial, poi_time_file_path)
+            write_time_to_csv(random_times, trial, random_time_file_path)
 
             # Write the GAP to disk
             write_gap_to_csv(ei_gaps, trial, ei_csv_file_path)
             write_gap_to_csv(ucb_gaps, trial, ucb_csv_file_path)
             write_gap_to_csv(poi_gaps, trial, poi_csv_file_path)
+            write_gap_to_csv(random_gaps, trial, random_csv_file_path)
 
             # Write the surrogate observations to disk
             write_observations_to_csv(sur_ei.X, get_observations(sur_ei), trial, ei_observation_csv_file_path)
             write_observations_to_csv(sur_ucb.X, get_observations(sur_ucb), trial, ucb_observation_csv_file_path)
             write_observations_to_csv(sur_poi.X, get_observations(sur_poi), trial, poi_observation_csv_file_path)
+            write_observations_to_csv(sur_random.X, get_observations(sur_random), trial, random_observations_csv_file_path)
         catch failure_error
-            msg = "($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS) failed with error: $(failure_error)"
+            msg = "($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS) failed with error: $(failure_error)\n"
             self_filename, extension = splitext(basename(@__FILE__))
             filename = DATA_DIRECTORY * "/" * self_filename * "/" * payload.name * "_failed.txt"
             write_error_to_disk(filename, msg)

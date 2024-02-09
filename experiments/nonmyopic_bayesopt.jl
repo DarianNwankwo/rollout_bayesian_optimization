@@ -1,5 +1,6 @@
 using ArgParse
 
+
 function parse_command_line(args)
     parser = ArgParseSettings("Myopic Bayesian Optimization CLI")
 
@@ -69,7 +70,9 @@ function parse_command_line(args)
     return parsed_args
 end
 
+
 cli_args = parse_command_line(ARGS)
+
 
 using Distributions
 using LinearAlgebra
@@ -337,6 +340,10 @@ function main(cli_args)
         "hartmann6d" => (name="hartmann6d", fn=TestHartmann6D, args=()),
         "hartmann4d" => (name="hartmann4d", fn=TestHartmann4D, args=()),
         "hartmann3d" => (name="hartmann3d", fn=TestHartmann3D, args=()),
+        "bohachevsky" => (name="bohachevsky", fn=TestBohachevsky, args=()),
+        "griewank3d" => (name="griewank3d", fn=TestGriewank, args=(3)),
+        "shekel4d" => (name="shekel4d", fn=TestShekel, args=()),
+        "dropwave" => (name="dropwave", fn=TestDropWave, args=()),
     )
 
     # Gaussian process hyperparameters
