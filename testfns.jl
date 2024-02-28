@@ -517,3 +517,130 @@ function TestLinearCosine1D(a=1, b=1; lb=-1.0, ub=1.0)
     xopt = (zeros(1),) # TODO
     return TestFunction(1, bounds, xopt, f, ∇f)
 end
+
+
+function TestShekel()
+    C = [4. 1. 8. 6. 3. 2. 5. 8. 6. 7.;
+         4. 1. 8. 6. 7. 9. 3. 1. 2. 3.;
+         4. 1. 8. 6. 3. 2. 5. 8. 6. 7.;
+         4. 1. 8. 6. 7. 9. 3. 1. 2. 3.]
+    β = [0.1, 0.2, 0.2, 0.4, 0.4, 0.6, 0.3, 0.7, 0.5, 0.5]
+    m = 10
+
+    function f(x)
+        f = 0.0
+        for i in 1:m
+            t = 0.0
+            for j in 1:4
+                t += (x[j] - C[j,i])^2
+            end
+            f += 1 / (t + β[i])
+        end
+        return -f
+    end
+
+    function ∇f(x)
+        df = zeros(4)
+        for i in 1:m
+            t = 0.0
+            for j in 1:4
+                t += (x[j] - C[j,i])^2
+            end
+            for j in 1:4
+                df[j] += 2 * (x[j] - C[j,i]) / (t + β[i])^2
+            end
+        end
+        return -df
+    end
+
+    bounds = [zeros(4) 10ones(4)]
+    xopt = ([4.0, 4.0, 4.0, 4.0],)
+    return TestFunction(4, bounds, xopt, f, ∇f)
+end
+
+
+function TestDropWave()
+    f(x) = -(1 + cos(12*sqrt(sum(x.^2)))) / (0.5*sum(x.^2) + 2)
+    
+    function ∇f(x)
+        t = 12 * sqrt(sum(x.^2))
+        df = zeros(2)
+        for i in 1:2
+            df[i] = 12 * x[i] * sin(t) / sqrt(sum(x.^2)) / (0.5*sum(x.^2) + 2) - (1 + cos(t)) * (x[i] / (0.5*sum(x.^2) + 2)^2)
+        end
+        return -df
+    end
+
+    bounds = zeros(2, 2)
+    bounds[:,1] .= -5.12
+    bounds[:,2] .=  5.12
+    xopt = ([0.0, 0.0],)
+    return TestFunction(2, bounds, xopt, f, ∇f)
+end
+
+
+function TestGriewank(d)
+    f(x) = sum(x.^2) / 4000 - prod(cos.(x ./ sqrt.(collect(1:d)))) + 1
+    
+    function ∇f(x)
+        df = zeros(d)
+        for i in 1:d
+            df[i] = x[i] / 2000 + prod(cos.(x ./ sqrt.(collect(1:d)))) * sin(x[i] / sqrt(i))
+        end
+        return df
+    end
+
+    bounds = zeros(d, 2)
+    bounds[:,1] .= -600.0
+    bounds[:,2] .=  600.0
+    xopt = (zeros(d),)
+    return TestFunction(d, bounds, xopt, f, ∇f)
+end
+
+
+function TestBohachevsky()
+    f(x) = x[1]^2 + 2*x[2]^2 - 0.3*cos(3π*x[1]) - 0.4*cos(4π*x[2]) + 0.7
+    
+    function ∇f(x)
+        df = zeros(2)
+        df[1] = 2*x[1] + 0.9*π*sin(3π*x[1])
+        df[2] = 4*x[2] + 1.6*π*sin(4π*x[2])
+        return df
+    end
+
+    bounds = zeros(2, 2)
+    bounds[:,1] .= -100.0
+    bounds[:,2] .=  100.0
+    xopt = ([0.0, 0.0],)
+    return TestFunction(2, bounds, xopt, f, ∇f)
+end
+
+
+function TestGriewank(d)
+    function f(x)
+        sum = 0.0
+        product = 1.0
+        for i in 1:length(x)
+            sum += x[i]^2
+            product *= cos(x[i]/sqrt(i))
+        end
+        return 1 + sum/4000 - product
+    end
+    
+    function ∇f(x)
+        grad = zeros(length(x))
+        for i in 1:length(x)
+            sin_term = sin(x[i]/sqrt(i))
+            cos_term = prod([cos(x[j]/sqrt(j)) for j=1:length(x) if j != i])
+            grad[i] = 2*x[i]/4000 + sin_term * cos_term
+        end
+        return grad
+    end
+
+    bounds = zeros(d, 2)
+    bounds[:, 1] = -600.
+    bounds[:, 2] = 600.
+    xopt = (zeros(d),)
+
+    return TestFunction(d, bounds, xopt, f, ∇f)
+end
