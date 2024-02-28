@@ -31,7 +31,7 @@ function parse_command_line(args)
         "--budget"
             action = :store_arg
             help = "Maximum budget for bayesian optimization (default: 15)"
-            default = 20
+            default = 15
             arg_type = Int
         "--output-dir"
             action = :store_arg
@@ -410,7 +410,9 @@ function main()
         "ackley2d" => (name="ackley2d", fn=TestAckley, args=(2)),
         "ackley3d" => (name="ackley3d", fn=TestAckley, args=(3)),
         "ackley4d" => (name="ackley4d", fn=TestAckley, args=(4)),
-        "ackley10d" => (name="ackley10d", fn=TestAckley, args=(2)),
+        "ackley8d" => (name="ackley8d", fn=TestAckley, args=(8)),
+        "ackley10d" => (name="ackley10d", fn=TestAckley, args=(10)),
+        "ackley16d" => (name="ackley16d", fn=TestAckley, args=(16)),
         "rosenbrock" => (name="rosenbrock", fn=TestRosenbrock, args=()),
         "sixhump" => (name="sixhump", fn=TestSixHump, args=()),
         "braninhoo" => (name="braninhoo", fn=TestBraninHoo, args=()),
@@ -446,6 +448,8 @@ function main()
         "griewank3d" => (name="griewank3d", fn=TestGriewank, args=(3)),
         "shekel4d" => (name="shekel4d", fn=TestShekel, args=()),
         "dropwave" => (name="dropwave", fn=TestDropWave, args=()),
+        "griewank1d" => (name="griewank1d", fn=TestGriewank, args=(1)),
+        "griewank2d" => (name="griewank1d", fn=TestGriewank, args=(2)),
     )
 
     # Gaussian process hyperparameters

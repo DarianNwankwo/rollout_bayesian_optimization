@@ -294,7 +294,7 @@ function main(cli_args)
     DATA_DIRECTORY = cli_args["output-dir"]
     SHOULD_OPTIMIZE = if haskey(cli_args, "optimize") cli_args["optimize"] else false end
     HORIZON = cli_args["horizon"]
-    MC_SAMPLES = cli_args["mc-samples"] * (HORIZON + 1)
+    MC_SAMPLES = cli_args["mc-samples"] # * (HORIZON + 1)
     BATCH_SIZE = cli_args["batch-size"]
     SGD_ITERATIONS = cli_args["sgd-iterations"]
     SHOULD_REDUCE_VARIANCE = if haskey(cli_args, "variance-reduction") cli_args["variance-reduction"] else false end
@@ -308,7 +308,9 @@ function main(cli_args)
         "ackley2d" => (name="ackley2d", fn=TestAckley, args=(2)),
         "ackley3d" => (name="ackley3d", fn=TestAckley, args=(3)),
         "ackley4d" => (name="ackley4d", fn=TestAckley, args=(4)),
-        "ackley10d" => (name="ackley10d", fn=TestAckley, args=(2)),
+        "ackley8d" => (name="ackley8d", fn=TestAckley, args=(8)),
+        "ackley16d" => (name="ackley16d", fn=TestAckley, args=(16)),
+        "ackley10d" => (name="ackley10d", fn=TestAckley, args=(10)),
         "rosenbrock" => (name="rosenbrock", fn=TestRosenbrock, args=()),
         "sixhump" => (name="sixhump", fn=TestSixHump, args=()),
         "braninhoo" => (name="braninhoo", fn=TestBraninHoo, args=()),
@@ -344,6 +346,8 @@ function main(cli_args)
         "griewank3d" => (name="griewank3d", fn=TestGriewank, args=(3)),
         "shekel4d" => (name="shekel4d", fn=TestShekel, args=()),
         "dropwave" => (name="dropwave", fn=TestDropWave, args=()),
+        "griewank1d" => (name="griewank1d", fn=TestGriewank, args=(1)),
+        "griewank2d" => (name="griewank1d", fn=TestGriewank, args=(2)),
     )
 
     # Gaussian process hyperparameters
@@ -381,7 +385,7 @@ function main(cli_args)
     # rollout_observations = Vector{Matrix{Float64}}(undef, NUMBER_OF_TRIALS)
 
     # Allocate space for times
-    rollout_times = zeros(NUMBER_OF_TRIALS)
+    rollout_times = zeros(BUDGET)
 
     # Create the CSV for the current test function being evaluated
     rollout_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_gaps.csv", BUDGET)
