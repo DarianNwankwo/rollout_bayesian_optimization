@@ -369,3 +369,14 @@ function measure_gap(observations::Vector{T}, fbest::T) where T <: Number
 
     return result
 end
+
+
+function generate_initial_guesses(N::Int, lbs::Vector{T}, ubs::Vector{T},) where T <: Number
+    ϵ = 1e-6
+    seq = SobolSeq(lbs, ubs)
+    initial_guesses = reduce(hcat, next!(seq) for i = 1:N)
+    initial_guesses = hcat(initial_guesses, lbs .+ ϵ)
+    initial_guesses = hcat(initial_guesses, ubs .- ϵ)
+
+    return initial_guesses
+end
