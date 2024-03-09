@@ -64,6 +64,9 @@ function parse_command_line(args)
         "--variance-reduction"
             action = :store_true
             help = "Use EI as a control variate for variance reduction"
+        "--truncate-horizon"
+            action = :store_true
+            help = "Truncates the horizon to be within the budget"
     end
 
     parsed_args = parse_args(args, parser)
@@ -177,6 +180,7 @@ function write_metadata_to_file(cli_args)
     batch_size = cli_args["batch-size"]
     sgd_iterations = cli_args["sgd-iterations"]
     should_reduce_variance = haskey(cli_args, "variance-reduction") ? cli_args["variance-reduction"] : false
+    should_truncate_horizon = haskey(cli_args, "truncate-horizon") ? cli_args["truncate-horizon"] : false
 
     # Get directory for experiment
     self_filename, extension = splitext(basename(@__FILE__))
@@ -197,6 +201,7 @@ function write_metadata_to_file(cli_args)
         println(file, "Batch Size: ", batch_size)
         println(file, "SGD Iterations: ", sgd_iterations)
         println(file, "Should Reduce Variance: ", should_reduce_variance)
+        println(file, "Should Truncate Horizon: ", should_truncate_horizon)
     end
 end
 
@@ -297,7 +302,8 @@ function main(cli_args)
     MC_SAMPLES = cli_args["mc-samples"] # * (HORIZON + 1)
     BATCH_SIZE = cli_args["batch-size"]
     SGD_ITERATIONS = cli_args["sgd-iterations"]
-    SHOULD_REDUCE_VARIANCE = if haskey(cli_args, "variance-reduction") cli_args["variance-reduction"] else false end
+    SHOULD_REDUCE_VARIANCE = haskey(cli_args, "variance-reduction") ? cli_args["variance-reduction"] : false
+    SHOULD_TRUNCATE_HORIZON = haskey(cli_args, "truncate-horizon") cli_args["truncate-horizon"] : false
 
     # Establish the synthetic functions we want to evaluate our algorithms on.
     testfn_payloads = Dict(
@@ -436,6 +442,11 @@ function main(cli_args)
             # Perform Bayesian optimization iterations
             print("Budget Counter: ")
             for budget in 1:BUDGET
+                if SHOULD_TRUNCATE_HORIZON
+                    # Truncate the horizon as we approach the end of our budget
+                    tp.h = min(HORIZON, BUDGET - budget)
+                end
+
                 # Solve the acquisition function
                 time_elapsed = @elapsed begin
                 xbest, fbest = distributed_rollout_solver(
