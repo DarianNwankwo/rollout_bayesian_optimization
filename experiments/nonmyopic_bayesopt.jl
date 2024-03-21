@@ -88,6 +88,7 @@ using Distributed
 
 Distributed.addprocs(cli_args["nworkers"])
 
+
 @everywhere include("../testfns.jl")
 @everywhere include("../rollout.jl")
 @everywhere include("../utils.jl")
@@ -165,6 +166,50 @@ function create_gap_csv_file(
 end
 
 
+function create_allocation_csv_file(
+    parent_directory::String,
+    child_directory::String,
+    csv_filename::String,
+    budget::Int
+    )
+    # Create directory for finished experiment
+    self_filename, extension = splitext(basename(@__FILE__))
+    dir_name = parent_directory * "/" * self_filename * "/" * child_directory
+    mkpath(dir_name)
+
+    # Write the header to the csv file
+    path_to_csv_file = dir_name * "/" * csv_filename
+    col_names = vcat(["trial"], ["$i" for i in 1:budget])
+
+    CSV.write(
+        path_to_csv_file,
+        DataFrame(
+            -ones(1, budget + 1),
+            Symbol.(col_names)
+        )    
+    )
+
+    return path_to_csv_file
+end
+
+function write_allocations_to_csv(
+    allocations::Vector{T},
+    trial_number::Int,
+    path_to_csv_file::String
+    ) where T <: Number
+    # Write gap to csv
+    CSV.write(
+        path_to_csv_file,
+        Tables.table(
+            hcat([trial_number allocations'])
+        ),
+        append=true,
+    )
+
+    return nothing
+end
+
+
 function write_metadata_to_file(cli_args)
     # Extract the parameters from the command-line arguments
     budget = cli_args["budget"]
@@ -197,7 +242,6 @@ function write_metadata_to_file(cli_args)
         println(file, "Batch Size: ", batch_size)
         println(file, "SGD Iterations: ", sgd_iterations)
         println(file, "Should Reduce Variance: ", should_reduce_variance)
-        println(file, "Should Truncate Horizon: ", should_truncate_horizon)
     end
 end
 
@@ -409,7 +453,7 @@ function main(cli_args)
 
     # Create the CSV for the current test function being evaluated for memory allocations
     rollout_allocations_file_path = create_allocation_csv_file(
-        
+        DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_allocations.csv", BUDGET
     )
     
     # Write the metadata to disk
@@ -436,9 +480,6 @@ function main(cli_args)
     final_locations = SharedMatrix{Float64}(length(tp.x0), size(batch, 2))
     final_evaluations = SharedArray{Float64}(size(batch, 2))
 
-    # Variable for holding time elapsed during acquisition solve
-    time_elapsed = 0.
-
     for trial in 1:NUMBER_OF_TRIALS
         try
             println("($(payload.name)) Trial $(trial) of $(NUMBER_OF_TRIALS)...")
@@ -454,7 +495,7 @@ function main(cli_args)
                 tp.h = min(HORIZON, BUDGET - budget)
 
                 # Solve the acquisition function
-                time_elapsed = @elapsed begin
+                timed_outcome = @timed begin
                 xbest, fbest = distributed_rollout_solver(
                     sur=sur, tp=tp, xstarts=initial_guesses, batch=batch, max_iterations=SGD_ITERATIONS,
                     candidate_locations=candidate_locations, candidate_values=candidate_values,
@@ -465,7 +506,8 @@ function main(cli_args)
                 ybest = testfn.f(xbest)
                 # Update the surrogate model
                 sur = update_surrogate(sur, xbest, ybest)
-                rollout_times[budget] = time_elapsed
+                rollout_times[budget] = timed_outcome.time
+                rollout_allocations[budget] = timed_outcome.bytes
 
                 if SHOULD_OPTIMIZE
                     sur = optimize_hypers_optim(sur, kernel_matern52)
@@ -478,13 +520,10 @@ function main(cli_args)
             fbest = testfn.f(testfn.xopt[1])
             rollout_gaps[:] .= measure_gap(get_observations(sur), fbest)
 
-            # Write the time to disk
             write_time_to_csv(rollout_times, trial, rollout_time_file_path)
-
-            # Write the GAP to disk
             write_gap_to_csv(rollout_gaps, trial, rollout_csv_file_path)
-            # Write the surrogate observations to disk
             write_observations_to_csv(sur.X, get_observations(sur), trial, rollout_observation_csv_file_path)
+            write_allocations_to_csv(rollout_allocations, trial, rollout_allocations_file_path)
         catch failure_error
             msg = "($(payload.name)) Trial $(trial) failed with error: $(failure_error)"
             self_filename, extension = splitext(basename(@__FILE__))
