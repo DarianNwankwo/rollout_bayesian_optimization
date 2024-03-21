@@ -1,1 +1,0 @@
-(braninhoo) Trial 27 of 50 failed with error: AssertionError("isfinite(phi_c) && isfinite(dphi_c)")

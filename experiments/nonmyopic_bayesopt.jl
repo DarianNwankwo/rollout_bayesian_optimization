@@ -64,9 +64,6 @@ function parse_command_line(args)
         "--variance-reduction"
             action = :store_true
             help = "Use EI as a control variate for variance reduction"
-        "--truncate-horizon"
-            action = :store_true
-            help = "Truncates the horizon to be within the budget"
     end
 
     parsed_args = parse_args(args, parser)
@@ -180,7 +177,6 @@ function write_metadata_to_file(cli_args)
     batch_size = cli_args["batch-size"]
     sgd_iterations = cli_args["sgd-iterations"]
     should_reduce_variance = haskey(cli_args, "variance-reduction") ? cli_args["variance-reduction"] : false
-    should_truncate_horizon = haskey(cli_args, "truncate-horizon") ? cli_args["truncate-horizon"] : false
 
     # Get directory for experiment
     self_filename, extension = splitext(basename(@__FILE__))
@@ -297,72 +293,70 @@ function main(cli_args)
     NUMBER_OF_TRIALS = cli_args["trials"]
     NUMBER_OF_STARTS = cli_args["starts"]
     DATA_DIRECTORY = cli_args["output-dir"]
-    SHOULD_OPTIMIZE = if haskey(cli_args, "optimize") cli_args["optimize"] else false end
+    SHOULD_OPTIMIZE = haskey(cli_args, "optimize") ? cli_args["optimize"] : false
     HORIZON = cli_args["horizon"]
     MC_SAMPLES = cli_args["mc-samples"] # * (HORIZON + 1)
     BATCH_SIZE = cli_args["batch-size"]
     SGD_ITERATIONS = cli_args["sgd-iterations"]
     SHOULD_REDUCE_VARIANCE = haskey(cli_args, "variance-reduction") ? cli_args["variance-reduction"] : false
-    SHOULD_TRUNCATE_HORIZON = haskey(cli_args, "truncate-horizon") cli_args["truncate-horizon"] : false
+    FUNCTION_NAME = cli_args["function-name"]
 
     # Establish the synthetic functions we want to evaluate our algorithms on.
-    testfn_payloads = Dict(
-        "gramacylee" => (name="gramacylee", fn=TestGramacyLee, args=()),
-        "rastrigin1d" => (name="rastrigin", fn=TestRastrigin, args=(1)),
-        "rastrigin4d" => (name="rastrigin4d", fn=TestRastrigin, args=(4)),
-        "ackley1d" => (name="ackley1d", fn=TestAckley, args=(1)),
-        "ackley2d" => (name="ackley2d", fn=TestAckley, args=(2)),
-        "ackley3d" => (name="ackley3d", fn=TestAckley, args=(3)),
-        "ackley4d" => (name="ackley4d", fn=TestAckley, args=(4)),
-        "ackley8d" => (name="ackley8d", fn=TestAckley, args=(8)),
-        "ackley16d" => (name="ackley16d", fn=TestAckley, args=(16)),
-        "ackley10d" => (name="ackley10d", fn=TestAckley, args=(10)),
-        "rosenbrock" => (name="rosenbrock", fn=TestRosenbrock, args=()),
-        "sixhump" => (name="sixhump", fn=TestSixHump, args=()),
-        "braninhoo" => (name="braninhoo", fn=TestBraninHoo, args=()),
-        "hartmann3d" => (name="hartmann3d", fn=TestHartmann3D, args=()),
-        "goldsteinprice" => (name="goldsteinprice", fn=TestGoldsteinPrice, args=()),
-        "beale" => (name="beale", fn=TestBeale, args=()),
-        "easom" => (name="easom", fn=TestEasom, args=()),
-        "styblinskitang1d" => (name="styblinskitang1d", fn=TestStyblinskiTang, args=(1)),
-        "styblinskitang2d" => (name="styblinskitang2d", fn=TestStyblinskiTang, args=(2)),
-        "styblinskitang3d" => (name="styblinskitang3d", fn=TestStyblinskiTang, args=(3)),
-        "styblinskitang4d" => (name="styblinskitang4d", fn=TestStyblinskiTang, args=(4)),
-        "styblinskitang10d" => (name="styblinskitang10d", fn=TestStyblinskiTang, args=(10)),
-        "bukinn6" => (name="bukinn6", fn=TestBukinN6, args=()),
-        "crossintray" => (name="crossintray", fn=TestCrossInTray, args=()),
-        "eggholder" => (name="eggholder", fn=TestEggHolder, args=()),
-        "holdertable" => (name="holdertable", fn=TestHolderTable, args=()),
-        "schwefel1d" => (name="schwefel1d", fn=TestSchwefel, args=(1)),
-        "schwefel2d" => (name="schwefel2d", fn=TestSchwefel, args=(2)),
-        "schwefel3d" => (name="schwefel3d", fn=TestSchwefel, args=(3)),
-        "schwefel4d" => (name="schwefel4d", fn=TestSchwefel, args=(4)),
-        "schwefel10d" => (name="schwefel10d", fn=TestSchwefel, args=(10)),
-        "levyn13" => (name="levyn13", fn=TestLevyN13, args=()),
-        "trid1d" => (name="trid1d", fn=TestTrid, args=(1)),
-        "trid2d" => (name="trid2d", fn=TestTrid, args=(2)),
-        "trid3d" => (name="trid3d", fn=TestTrid, args=(3)),
-        "trid4d" => (name="trid4d", fn=TestTrid, args=(4)),
-        "trid10d" => (name="trid10d", fn=TestTrid, args=(10)),
-        "mccormick" => (name="mccormick", fn=TestMccormick, args=()),
-        "hartmann6d" => (name="hartmann6d", fn=TestHartmann6D, args=()),
-        "hartmann4d" => (name="hartmann4d", fn=TestHartmann4D, args=()),
-        "hartmann3d" => (name="hartmann3d", fn=TestHartmann3D, args=()),
-        "bohachevsky" => (name="bohachevsky", fn=TestBohachevsky, args=()),
-        "griewank3d" => (name="griewank3d", fn=TestGriewank, args=(3)),
-        "shekel4d" => (name="shekel4d", fn=TestShekel, args=()),
-        "dropwave" => (name="dropwave", fn=TestDropWave, args=()),
-        "griewank1d" => (name="griewank1d", fn=TestGriewank, args=(1)),
-        "griewank2d" => (name="griewank1d", fn=TestGriewank, args=(2)),
+    testfn_payloads = (
+        (name="gramacylee", fn=TestGramacyLee, args=()),
+        (name="rastrigin", fn=TestRastrigin, args=(1)),
+        (name="rastrigin4d", fn=TestRastrigin, args=(4)),
+        (name="ackley1d", fn=TestAckley, args=(1)),
+        (name="ackley2d", fn=TestAckley, args=(2)),
+        (name="ackley3d", fn=TestAckley, args=(3)),
+        (name="ackley4d", fn=TestAckley, args=(4)),
+        (name="ackley8d", fn=TestAckley, args=(8)),
+        (name="ackley16d", fn=TestAckley, args=(16)),
+        (name="ackley10d", fn=TestAckley, args=(10)),
+        (name="rosenbrock", fn=TestRosenbrock, args=()),
+        (name="sixhump", fn=TestSixHump, args=()),
+        (name="braninhoo", fn=TestBraninHoo, args=()),
+        (name="hartmann3d", fn=TestHartmann3D, args=()),
+        (name="goldsteinprice", fn=TestGoldsteinPrice, args=()),
+        (name="beale", fn=TestBeale, args=()),
+        (name="easom", fn=TestEasom, args=()),
+        (name="styblinskitang1d", fn=TestStyblinskiTang, args=(1)),
+        (name="styblinskitang2d", fn=TestStyblinskiTang, args=(2)),
+        (name="styblinskitang3d", fn=TestStyblinskiTang, args=(3)),
+        (name="styblinskitang4d", fn=TestStyblinskiTang, args=(4)),
+        (name="styblinskitang10d", fn=TestStyblinskiTang, args=(10)),
+        (name="bukinn6", fn=TestBukinN6, args=()),
+        (name="crossintray", fn=TestCrossInTray, args=()),
+        (name="eggholder", fn=TestEggHolder, args=()),
+        (name="holdertable", fn=TestHolderTable, args=()),
+        (name="schwefel1d", fn=TestSchwefel, args=(1)),
+        (name="schwefel2d", fn=TestSchwefel, args=(2)),
+        (name="schwefel3d", fn=TestSchwefel, args=(3)),
+        (name="schwefel4d", fn=TestSchwefel, args=(4)),
+        (name="schwefel10d", fn=TestSchwefel, args=(10)),
+        (name="levyn13", fn=TestLevyN13, args=()),
+        (name="trid1d", fn=TestTrid, args=(1)),
+        (name="trid2d", fn=TestTrid, args=(2)),
+        (name="trid3d", fn=TestTrid, args=(3)),
+        (name="trid4d", fn=TestTrid, args=(4)),
+        (name="trid10d", fn=TestTrid, args=(10)),
+        (name="mccormick", fn=TestMccormick, args=()),
+        (name="hartmann6d", fn=TestHartmann6D, args=()),
+        (name="hartmann4d", fn=TestHartmann4D, args=()),
+        (name="hartmann3d", fn=TestHartmann3D, args=()),
+        (name="bohachevsky", fn=TestBohachevsky, args=()),
+        (name="griewank3d", fn=TestGriewank, args=(3)),
+        (name="shekel4d", fn=TestShekel, args=()),
+        (name="dropwave", fn=TestDropWave, args=()),
+        (name="griewank1d", fn=TestGriewank, args=(1)),
+        (name="griewank1d", fn=TestGriewank, args=(2)),
     )
 
     # Gaussian process hyperparameters
     θ, σn2 = [1.], 1e-6
     ψ = kernel_matern52(θ)
 
-    # Build the test function object
-    payload = testfn_payloads[cli_args["function-name"]]
-    println("Running experiment for $(payload.name).")
+    println("Running experiment for $(FUNCTION_NAME).")
     println("Configuration: ")
     println("    Budget: $(BUDGET)")
     println("    Number of trials: $(NUMBER_OF_TRIALS)")
@@ -374,6 +368,9 @@ function main(cli_args)
     println("    Batch size: $(BATCH_SIZE)")
     println("    SGD iterations: $(SGD_ITERATIONS)")
     println("    Variance reduction: $(SHOULD_REDUCE_VARIANCE)")
+    
+    # Build the test function object
+    payload = first([p for p in testfn_payloads if p.name == FUNCTION_NAME])
     testfn = payload.fn(payload.args...)
     lbs, ubs = testfn.bounds[:,1], testfn.bounds[:,2]
 
@@ -388,21 +385,32 @@ function main(cli_args)
 
     # Allocate space for GAPS
     rollout_gaps = zeros(BUDGET + 1)
-    # rollout_observations = Vector{Matrix{Float64}}(undef, NUMBER_OF_TRIALS)
 
     # Allocate space for times
     rollout_times = zeros(BUDGET)
 
+    # Allocate space for memory allocations
+    rollout_allocations = zeros(BUDGET)
+
     # Create the CSV for the current test function being evaluated
-    rollout_csv_file_path = create_gap_csv_file(DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_gaps.csv", BUDGET)
+    rollout_csv_file_path = create_gap_csv_file(
+        DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_gaps.csv", BUDGET
+    )
 
     # Create the CSV for the current test function being evaluated observations
     rollout_observation_csv_file_path = create_observation_csv_file(
         DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_observations.csv", BUDGET
     )
 
-    # Create the CSV for the current test function being evaluated
-    rollout_time_file_path = create_time_csv_file(DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_times.csv", BUDGET)
+    # Create the CSV for the current test function being evaluated for timing
+    rollout_time_file_path = create_time_csv_file(
+        DATA_DIRECTORY, payload.name, "rollout_h$(HORIZON)_times.csv", BUDGET
+    )
+
+    # Create the CSV for the current test function being evaluated for memory allocations
+    rollout_allocations_file_path = create_allocation_csv_file(
+        
+    )
     
     # Write the metadata to disk
     write_metadata_to_file(cli_args)
@@ -442,10 +450,8 @@ function main(cli_args)
             # Perform Bayesian optimization iterations
             print("Budget Counter: ")
             for budget in 1:BUDGET
-                if SHOULD_TRUNCATE_HORIZON
-                    # Truncate the horizon as we approach the end of our budget
-                    tp.h = min(HORIZON, BUDGET - budget)
-                end
+                # Truncate the horizon as we approach the end of our budget
+                tp.h = min(HORIZON, BUDGET - budget)
 
                 # Solve the acquisition function
                 time_elapsed = @elapsed begin
